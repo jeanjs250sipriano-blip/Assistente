@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Assistente</title>
+<title>Rafinha</title>
 <style>
 :root{--bg:#f6f7fb;--card:#fff;--tx:#1b1d2a;--mut:#6b7086;--ac:#5b5bd6;--u:#5b5bd6;--ut:#fff;--a:#fff;--bd:#e3e5ef;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12131a;--card:#1c1e29;--tx:#eceef7;--mut:#9095ad;--a:#1c1e29;--bd:#2b2e3d}}
@@ -34,10 +34,13 @@ textarea,input,select{font:inherit;color:var(--tx);background:var(--bg);border:1
 label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--mut)}
 label.ck{flex-direction:row;align-items:center;gap:8px;color:var(--tx);font-size:15px}label.ck input{width:auto}
 pre{white-space:pre-wrap;font-size:12px;margin:0}
+#modes{display:flex;gap:6px;padding:8px 14px;background:var(--card);border-bottom:1px solid var(--bd)}
+#modes button{flex:1}#modes button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+#trB{display:none;padding:6px 14px;font-size:13px;background:var(--bg);color:var(--mut);border-bottom:1px dashed var(--bd)}
 </style></head><body>
-<header><span class="dot" id="dot"></span><div style="flex:1"><b id="nm">Assistente</b><br><small id="st">Pronta</small></div>
+<header><span class="dot" id="dot"></span><div style="flex:1"><b id="nm">Rafinha</b><br><small id="st">Pronta</small></div>
 <button class="ic" id="bMem" title="Memória e configurações">☰</button></header>
-<div id="chat"></div>
+<nav id="modes"><button id="mChat" class="on">💬 Conversar</button><button id="mTr">🧠 Treinar</button></nav><div id="trB">🧠 Modo Treinamento — o que você ensinar será revisado e só é salvo depois da sua confirmação.</div><div id="chat"></div>
 <div id="spk"><button id="sp1">⏸ Pausar</button><button id="sp2">▶ Continuar</button><button id="sp3">⏹ Parar</button></div>
 <div id="bar">
 <button class="ic" id="bAtt" title="Anexar arquivo">📎</button>
@@ -59,25 +62,21 @@ const hash=s=>{let h=5381;for(let i=0;i<s.length;i++)h=((h<<5)+h+s.charCodeAt(i)
 const today=()=>new Date().toISOString().slice(0,10);
 const Log={items:[],add(t,e){this.items.push(new Date().toLocaleTimeString()+" "+t+(e?" – "+(e.message||e):""));if(this.items.length>200)this.items.shift()}};
 /* ===== banco (camada única sobre IndexedDB) ===== */
-const DB=(()=>{let db;const S=["memory","knowledge","docs","messages","settings"];
-const open=()=>new Promise((ok,no)=>{if(!window.indexedDB)return no(new Error("IndexedDB indisponível"));const r=indexedDB.open("assistente",1);
-r.onupgradeneeded=()=>S.forEach(s=>r.result.createObjectStore(s,{keyPath:"id"}));r.onsuccess=()=>{db=r.result;ok()};r.onerror=()=>no(r.error)});
+const DB=(()=>{let db;const S=["memory","knowledge","docs","messages","settings","episodes"];
+const open=()=>new Promise((ok,no)=>{if(!window.indexedDB)return no(new Error("IndexedDB indisponível"));const r=indexedDB.open("assistente",2);
+r.onupgradeneeded=e=>{S.forEach(n=>{if(!r.result.objectStoreNames.contains(n))r.result.createObjectStore(n,{keyPath:"id"})});
+if(e.oldVersion===1){r.transaction.objectStore("memory").openCursor().onsuccess=ev=>{const c=ev.target.result;if(!c)return;const m=c.value;if(!m.camada){m.camada="usuario";m.categoria=m.tipo==="preferencia"?"preferencia":"pessoal";m.importancia=6;m.criadoEm=m.data;m.atualizadoEm=m.data;m.persistente=true;c.update(m)}c.continue()}}};r.onsuccess=()=>{db=r.result;ok()};r.onerror=()=>no(r.error)});
 const tx=(s,m,f)=>new Promise((ok,no)=>{const t=db.transaction(s,m),q=f(t.objectStore(s));t.oncomplete=()=>ok(q&&q.result);t.onerror=()=>no(t.error)});
 return{open,put:(s,o)=>tx(s,"readwrite",x=>x.put(o)),all:s=>tx(s,"readonly",x=>x.getAll()),del:(s,id)=>tx(s,"readwrite",x=>x.delete(id)),
 async exportAll(k){const o={versao:1,exportadoEm:new Date().toISOString()};for(const s of(k?[k]:S))o[s]=await this.all(s);return o},
 async importAll(o){let n=0;for(const s of S)for(const r of(o[s]||[])){if(r&&r.id){await this.put(s,r);n++}}return n}}})();
 /* ===== configurações / personalidade ===== */
-const Cfg={v:{id:"cfg",nome:"Aurora",formal:"informal",tamanho:"curtas",voz:"",auto:false,dev:false,instr:""},
+const Cfg={v:{id:"cfg",nome:"Rafinha",formal:"informal",tamanho:"curtas",voz:"",auto:false,dev:false,instr:""},
 async load(){const all=await DB.all("settings");const c=all.find(x=>x.id==="cfg");if(c)Object.assign(this.v,c)},save(){return DB.put("settings",this.v)}};
 /* ===== busca textual local ===== */
 const tokens=s=>norm(s).split(/[^a-z0-9]+/).filter(w=>w.length>2);
 function score(q,t){const T=norm(t);let s=0;for(const w of q)if(T.includes(w))s++;return q.length?s/q.length:0}
-const Search={async mem(q,min=.5){const Q=tokens(q);const r=[];
-for(const m of await DB.all("memory"))r.push({...m,tipoFonte:"memória",sc:score(Q,m.chave+" "+m.valor)});
-for(const k of await DB.all("knowledge"))r.push({...k,tipoFonte:"conhecimento",sc:score(Q,k.titulo+" "+k.conteudo)});
-for(const d of await DB.all("docs"))if(d.aprendido)d.chunks.forEach((c,i)=>r.push({id:d.id,titulo:d.nome,conteudo:c,tipoFonte:"documento",sc:score(Q,c)}));
-return r.filter(x=>x.sc>=min).sort((a,b)=>b.sc-a.sc)},
-async docs(q){const Q=tokens(q),r=[];for(const d of await DB.all("docs"))d.chunks.forEach((c,i)=>{const s=score(Q,c);if(s>=.5)r.push({nome:d.nome,trecho:c,sc:s,i})});return r.sort((a,b)=>b.sc-a.sc)}};
+const Search={mem:q=>Retrieve.find(q),async docs(q){const Q=tokens(q),r=[];for(const d of await DB.all("docs"))d.chunks.forEach((c,i)=>{const s=score(Q,c);if(s>=.5)r.push({nome:d.nome,trecho:c,sc:s,i})});return r.sort((a,b)=>b.sc-a.sc)}};
 /* ===== documentos ===== */
 const Docs=(()=>{const MAX=15*1024*1024,EXT=["txt","md","json","csv","html","htm","pdf"];
 const chunk=(t,n=1000)=>{const out=[];let i=0;while(i<t.length){let e=Math.min(i+n,t.length);if(e<t.length){const b=t.lastIndexOf(". ",e);if(b>i+n*.5)e=b+1}out.push(t.slice(i,e).trim());i=e}return out.filter(Boolean)};
@@ -113,60 +112,138 @@ rec.onerror=e=>{Log.add("voz erro",e.error);sys(e.error==="not-allowed"?"Não fo
 rec.onend=()=>{rec=null;onEnd(fin)};try{rec.start()}catch(e){sys("Não foi possível iniciar o microfone.")}}
 const cancel=()=>{if(rec){rec.onend=()=>{rec=null;setSt("Pronta");$("#dot").className="dot"};rec.abort()}};
 function speak(t){if(!synOk())return sys("Este navegador não oferece síntese de voz.");speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang="pt-BR";
-const v=speechSynthesis.getVoices().find(v=>v.name===Cfg.v.voz);if(v)u.voice=v;u.onstart=()=>$("#spk").style.display="flex";u.onend=u.onerror=()=>$("#spk").style.display="none";speechSynthesis.speak(u)}
-return{ok,synOk,listen,cancel,speak,active:()=>!!rec,voices:()=>synOk()?speechSynthesis.getVoices().filter(v=>v.lang.startsWith("pt")):[]}})();
+const v=pick();if(v){u.voice=v;u.lang=v.lang}u.rate=1.05;u.onstart=()=>$("#spk").style.display="flex";u.onend=u.onerror=()=>$("#spk").style.display="none";speechSynthesis.speak(u)}
+function pick(){const all=speechSynthesis.getVoices();const sel=all.find(v=>v.name===Cfg.v.voz);if(sel)return sel;
+let pt=all.filter(v=>/^pt[-_]BR/i.test(v.lang));if(!pt.length)pt=all.filter(v=>/^pt/i.test(v.lang));
+const sc=v=>{const n=v.name.toLowerCase();let x=0;if(/francisca|thalita|luciana|fernanda|camila|vit[oó]ria|google portugu[eê]s do brasil|natural|online/.test(n))x+=3;if(/female|feminin/.test(n))x+=2;if(/antonio|daniel|felipe|ricardo|luciano|\bmale\b|masculin/.test(n))x-=5;if(/^pt[-_]BR/i.test(v.lang))x+=1;return x};
+return pt.sort((a,b)=>sc(b)-sc(a))[0]||null}
+return{ok,synOk,listen,cancel,speak,pick,active:()=>!!rec,voices:()=>synOk()?speechSynthesis.getVoices().filter(v=>v.lang.startsWith("pt")):[]}})();
 /* ===== interface de chat ===== */
-const chat=$("#chat");
+const chat=$("#chat");let modo="chat";
 function setSt(t){$("#st").textContent=t}
 function bubble(role,text,save=true){const d=document.createElement("div");d.className="m "+role;d.textContent=text;
 if(role==="a"){const s=document.createElement("span");s.className="sp";s.textContent="🔊 ouvir";s.onclick=()=>Voice.speak(text);d.appendChild(s)}
 chat.appendChild(d);chat.scrollTop=chat.scrollHeight;
-if(save&&role!=="s")DB.put("messages",{id:Date.now().toString(36)+Math.random().toString(36).slice(2,4),role,text,t:Date.now()}).catch(e=>Log.add("salvar msg",e))}
+if(save&&role!=="s")DB.put("messages",{id:uid(),role,text,modo,t:Date.now()}).catch(e=>Log.add("salvar msg",e))}
 const sys=t=>bubble("s",t,false);
-function say(t){bubble("a",t);if(Cfg.v.auto)Voice.speak(t)}
-/* ===== assistente: interpretação e aprendizado ===== */
+function say(t){bubble("a",t);Ctx.push("a",t);if(Cfg.v.auto)Voice.speak(t)}
+/* ===== contexto recente e sessão (→ memória episódica) ===== */
+const Ctx={recent:[],topico:null,push(role,t){this.recent.push({role,t});if(this.recent.length>12)this.recent.shift()},prevUser(){const u=this.recent.filter(x=>x.role==="u");return u.length>1?u[u.length-2].t:null}};
+const Sess={n:0,tok:{},saved:0,mode:"chat"};
+const Episodes={async consolidate(){if(Sess.n<4)return;const top=Object.entries(Sess.tok).sort((a,b)=>b[1]-a[1]).slice(0,3).map(x=>x[0]);
+const resumo="Em "+new Date().toLocaleDateString("pt-BR")+", conversa ("+(Sess.mode==="treino"?"treinamento":"normal")+") com "+Sess.n+" mensagens"+(top.length?" sobre: "+top.join(", "):"")+(Sess.saved?"; "+Sess.saved+" item(ns) memorizado(s)":"")+".";
+await DB.put("episodes",{id:uid(),camada:"episodica",resumo,assuntos:top,origem:"conversa",criadoEm:today(),importancia:3,confianca:.7,persistente:true});Sess.n=0;Sess.tok={};Sess.saved=0}};
+/* ===== recuperação de memória (só o que for relevante) ===== */
+const STOP=new Set("para como mais esse essa este esta isso com uma que dos das nos nas por sobre seu sua meu minha foi sao ser tem ate entre ainda tambem quando onde muito pelo pela voce sabe lembra fale".split(" "));
+const kw=(t,n=8)=>{const f={};tokens(t).filter(w=>w.length>4&&!STOP.has(w)).forEach(w=>f[w]=(f[w]||0)+1);return Object.entries(f).sort((a,b)=>b[1]-a[1]).slice(0,n).map(x=>x[0])};
+const Retrieve={async find(q,lim=6){const Q=tokens(q).filter(w=>!STOP.has(w));if(!Q.length)return[];const out=[];
+for(const m of await DB.all("memory"))out.push({src:"memória",cam:m.camada||"usuario",rec:m,txt:(m.assunto||"")+" "+m.chave+" "+m.valor,w:1+(m.importancia||5)/10});
+for(const k of await DB.all("knowledge"))out.push({src:"conhecimento",rec:k,txt:(k.assunto||k.titulo||"")+" "+(k.tags||[]).join(" ")+" "+(k.valor||k.conteudo||"")+" "+(k.trechos||[]).join(" "),w:1.2});
+for(const e of await DB.all("episodes"))out.push({src:"episódio",rec:e,txt:e.resumo,w:.7});
+for(const d of await DB.all("docs"))if(d.aprendido)d.chunks.forEach(c=>out.push({src:"documento",rec:d,txt:c,w:.9,doc:d.nome}));
+const r=out.map(x=>({...x,sc:score(Q,x.txt)*x.w})).filter(x=>x.sc>=.45).sort((a,b)=>b.sc-a.sc).slice(0,lim);
+for(const x of r)if(x.src==="memória"){x.rec.usos=(x.rec.usos||0)+1;x.rec.ultimoUso=today();DB.put("memory",x.rec)}return r}};
+const fmt=x=>{const r=x.rec;return x.src==="memória"?"• [memória "+x.cam+"] "+r.chave+": "+r.valor:x.src==="conhecimento"?"• [conhecimento] "+(r.assunto||r.titulo)+": "+String(r.valor||r.conteudo).slice(0,220):x.src==="episódio"?"• [lembrança] "+r.resumo:"• [documento "+x.doc+"] "+x.txt.slice(0,200)+"…"};
+/* ===== memória estruturada (com atualização, sem verdades concorrentes) ===== */
+const Mem={async save(it,origem){const all=await DB.all("memory"),nk=norm(it.chave),ex=all.find(m=>m.camada===it.camada&&norm(m.chave)===nk),now=today();
+if(ex){if(norm(ex.valor)===norm(it.valor))return{st:"igual"};const de=ex.valor;ex.anterior=[...(ex.anterior||[]),{valor:de,ate:now}];ex.valor=it.valor;ex.atualizadoEm=now;ex.origem=origem||ex.origem;await DB.put("memory",ex);this.after(ex);return{st:"atualizado",de}}
+const rec={id:uid(),camada:it.camada,categoria:it.categoria,tipo:it.categoria==="preferencia"?"preferencia":it.camada,assunto:it.assunto||null,chave:it.chave,valor:it.valor,origem:origem||"conversa",criadoEm:now,atualizadoEm:now,data:now,importancia:it.importancia||5,confianca:1,usos:0,ultimoUso:null,persistente:true};
+await DB.put("memory",rec);this.after(rec);Sess.saved++;return{st:"novo"}},
+after(r){if(r.camada==="identidade"&&r.chave==="nome"){Cfg.v.nome=r.valor;Cfg.save();applyCfg()}}};
+/*CORE*/
+/* ===== NÚCLEO COGNITIVO: só interpreta; não guarda nada, não tem personalidade ===== */
+const toYou=s=>s.replace(/\bmeus\b/gi,"seus").replace(/\bminhas\b/gi,"suas").replace(/\bmeu\b/gi,"seu").replace(/\bminha\b/gi,"sua").replace(/\bmim\b/gi,"você");
+const Core={
+strip(t){const n=Cfg.v.nome.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");return t.replace(new RegExp("^\\s*"+n+"\\s*[,:!\\-]+\\s*","i"),"").trim()},
+classify(b){b=b.trim().replace(/[.!]+$/,"");let m;const U=(cat,chave,valor,imp,x)=>({camada:"usuario",categoria:cat,chave,valor,importancia:imp,...x});
+if(m=b.match(/^(?:a partir de agora\s+)?(?:seu nome (?:é|e)|voc[eê] se chama|te chamo de)\s+(.+)$/i))return[{camada:"identidade",categoria:"identidade",chave:"nome",valor:m[1],importancia:10}];
+if(m=b.match(/^(?:ol[aá][.,]?\s*)?eu sou\s+(.+?),?\s+(?:o\s+|a\s+)?seu\s+(.+)$/i))return[U("pessoal","nome",m[1],9),U("relação","relação com a assistente",m[1]+" é meu(minha) "+m[2],8)];
+if(m=b.match(/^(?:meu nome (?:é|e)|me chamo)\s+(.+)$/i))return[U("pessoal","nome",m[1],9)];
+if(m=b.match(/^(?:que\s+)?(?:eu\s+)?(prefiro|gosto de|gosto que)\s+(.+)$/i))return[U("preferencia","preferência",m[1]+" "+m[2],7)];
+if(m=b.match(/^(?:meu|minha)\s+(projeto(?:\s+principal)?)\s+(?:se chama|é|e)\s+(.+)$/i))return[U("projeto",m[1],m[2],8,{assunto:m[2]})];
+if(m=b.match(/^(?:meu|minha)\s+(.+?)\s+(?:é|e|se chama)\s+(.+)$/i))return[U("pessoal",m[1],m[2],6)];
+return[]},
+nota(b){return{camada:"usuario",categoria:"nota",chave:b.split(/\s+/).slice(0,5).join(" "),valor:b,importancia:6}},
+interpret(raw,ctx){const t=this.strip(raw),n=norm(t);let m;
+const r={raw,t,tipo:"afirmacao",intencao:"conversar",temporal:"indefinido",neg:/\b(nao|nunca|jamais)\b/.test(n),ref:/\b(isso|isto|ele|ela|aquilo)\b/.test(n),assunto:null,items:[]};
+if(/\?\s*$/.test(t)||/^(qual|quais|quem|quando|onde|como|o que|por que|quanto|voce (sabe|lembra))\b/.test(n))r.tipo="pergunta";
+else if(/^(guarde|memorize|esqueca|aprenda|procure|busque|mostre|quero|vou|leia|adicione|anote|grave|registre)\b/.test(n))r.tipo="comando";
+const R=o=>({...r,...o});
+if(/^\/?ajuda$/.test(n))return R({intencao:"ajuda"});
+if(/^\/(backup|exportar)/.test(n))return R({intencao:"backup"});
+if(/^\/(memoria|conhecimento|documentos|projetos)/.test(n))return R({intencao:"painel",painel:"mem"});
+if(/^\/configuracoes/.test(n))return R({intencao:"painel",painel:"cf"});
+if(/^\/treinamento/.test(n))return R({intencao:"modo",modo:"treino"});
+if(/^\/conversa/.test(n))return R({intencao:"modo",modo:"chat"});
+if(m=t.match(/^(?:aprenda isso|aprenda este texto|memorize este texto)\s*[:\-]?\s*([\s\S]+)$/i))return R({intencao:"aprender_texto",texto:m[1]});
+if(m=t.match(/^(?:esque[cç]a|apague|n[aã]o precisa lembrar(?: d[eoa])?)\s+(.+)$/i))return R({intencao:"esquecer",assunto:m[1].replace(/[.!]$/,"").replace(/^(?:sobre|a informa[cç][aã]o (?:sobre|de)|meu|minha|o|a)\s+/i,"")});
+if(m=t.match(/^(?:guarde|memorize|grave|registre|anote|lembre-se)(?:\s+isso)?(?:\s+na sua mem[oó]ria)?(?:\s+(?:que|de que))?\s*[:,]?\s*([\s\S]*)$/i)){let b=m[1].trim();if(!b||/^(isso|esta informa[cç][aã]o|essa informa[cç][aã]o)[.!]?$/i.test(b))b=ctx.prevUser()||"";
+if(!b)return R({aviso:"O que devo memorizar? Diga, por exemplo: “memorize que meu projeto se chama JORNADA”."});
+const it=this.classify(b);return R({intencao:"memorizar",temporal:"permanente",items:it.length?it:[this.nota(b)]})}
+if(m=t.match(/^(?:quero|vou)\s+(?:te\s+)?ensinar(?:\s+(?:voc[eê]\s+)?(?:sobre|a hist[oó]ria d[eoa]s?|a|o))?\s+(.+)$/i))return R({intencao:"ensinar",assunto:m[1].replace(/[.!]$/,"")});
+if(m=t.match(/^(?:procure|busque|pesquise)\s+(?:no|nos)?\s*(?:documentos?|arquivo)?\s*(?:a informa[cç][aã]o\s+)?(?:sobre|de|do|da)?\s*(.+)$/i))return R({intencao:"buscar_doc",assunto:m[1]});
+if(/^(quais|quantos)\s+documentos/.test(n))return R({intencao:"listar_docs"});
+if(/mostre o que voce aprendeu|o que voce lembra\??$/.test(n))return R({intencao:"mostrar"});
+if(/(qual e o seu nome|como voce se chama|quem e voce|quem voce e)/.test(n))return R({intencao:"consultar_identidade"});
+if(/^quem sou eu\??$/.test(n))return R({intencao:"consultar_usuario",chave:"nome"});
+if(m=t.match(/^qual\s+(?:é|e)\s+(?:o\s+|a\s+)?(?:meu|minha)\s+(.+?)\??$/i))return R({intencao:"consultar_usuario",chave:m[1]});
+if(m=t.match(/(?:o que voc[eê] sabe (?:sobre|de|do|da)|me fale (?:sobre|de|do|da)|fale (?:sobre|de|do|da)|voc[eê] lembra (?:de|do|da|sobre))\s+(.+?)\??$/i))return R({intencao:"consultar_assunto",assunto:m[1]});
+const it=this.classify(t);if(it.length)return R({intencao:"informar",temporal:"permanente",items:it});
+if(m=t.match(/^(estou|tô|to|me sinto|ando)\s+(.+?)[.!]?$/i))return R({tipo:"relato",intencao:"estado",temporal:/\b(hoje|agora|no momento)\b/.test(n)?"presente":"indefinido",verbo:m[1].toLowerCase(),resto:m[2]});
+if(/^(ola|oi|bom dia|boa tarde|boa noite)\b[\s,.!]*([a-z]+)?[\s.!]*$/.test(n))return R({intencao:"saudacao"});
+return R({})}};
+/*ENDCORE*/
+/* ===== análise de conteúdo (local, por regras) ===== */
+function analyze(text,nome){const sents=text.split(/(?<=[.!?])\s+/).filter(s=>s.length>20),tags=kw(text,8);
+return{assunto:Ctx.topico||(nome?nome.replace(/\.[^.]+$/,"").replace(/[_-]+/g," "):tags[0]||"geral"),tags,resumo:(sents.slice(0,2).join(" ")||text).slice(0,320),rel:sents.filter(s=>/\d{2,4}/.test(s)).slice(0,3),n:sents.length}}
+const knRec=(a,origem,h)=>({id:uid(),camada:"conhecimento",categoria:"aprendido",assunto:a.assunto,titulo:a.assunto,valor:a.resumo,tags:a.tags,relevantes:a.rel,origem,criadoEm:today(),atualizadoEm:today(),dataCriacao:today(),dataAtualizacao:today(),importancia:6,confianca:.9,persistente:true,hash:h});
+async function learnText(t){t=t.trim();const h=hash(t),dup=(await DB.all("knowledge")).find(k=>k.hash===h);if(dup)return say("Já tenho esse texto (“"+(dup.assunto||dup.titulo)+"”). Nada foi duplicado.");
+const a=analyze(t),rec=knRec(a,modo==="treino"?"treinamento (texto)":"texto colado",h);rec.trechos=t.match(/[\s\S]{1,900}(?:\s|$)/g)||[t];
+ask({k:"know",rec},"Analisei o conteúdo ("+t.length+" caracteres, "+a.n+" frases).\nAssunto provável: "+a.assunto+"\nPalavras-chave: "+a.tags.slice(0,6).join(", ")+"\nResumo: "+a.resumo+"\n\nDeseja que eu aprenda esse conteúdo?")}
+async function importFile(f){try{setSt("Lendo arquivo…");$("#dot").className="dot busy";const d=await Docs.process(f),all=await DB.all("docs");
+const same=all.find(x=>x.hash===d.hash);if(same)return say("“"+f.name+"” já foi importado em "+same.data+" (conteúdo idêntico). Ignorei para não duplicar.");
+const ver=all.find(x=>x.nome===d.nome);await DB.put("docs",d);const a=analyze(d.chunks.join(" "),d.nome);
+say("Analisei “"+d.nome+"”: "+(d.paginas?d.paginas+" páginas, ":"")+d.chars+" caracteres, "+d.chunks.length+" trechos.\nAssunto provável: "+a.assunto+"\nPalavras-chave: "+a.tags.slice(0,6).join(", ")+"\nResumo: "+a.resumo+(a.rel.length?"\nInformação com data/número, por exemplo: “"+a.rel[0].slice(0,140)+"”":"")+(ver?"\n(Já havia uma versão com este nome e conteúdo diferente; mantive as duas.)":"")+"\n\nDeseja que eu aprenda esse conteúdo?");
+pending={k:"doc",d,a}}catch(e){Log.add("importar",e);sys("Não foi possível ler este arquivo: "+e.message)}finally{setSt("Pronta");$("#dot").className="dot"}}
+/* ===== ações (decidem o que fazer com o que o Núcleo interpretou) ===== */
 let pending=null;
 const YES=/^(sim|s|pode|confirmo|confirmar|ok|claro|isso)\b/i,NO=/^(n[aã]o|cancela|deixa)/i;
-const HELP="Posso:\n• Memorizar: “Meu nome é João”, “Minha cor favorita é azul”, “Prefiro respostas curtas”\n• Consultar: “Qual é meu nome?”\n• Aprender: “Aprenda isso: …” (com sua confirmação)\n• Esquecer: “Esqueça meu nome”\n• Documentos: anexe um arquivo (📎) e peça “procure no documento …”\n• “Mostre o que você aprendeu”, “/backup”\n\nHonestidade: eu guardo e busco textos localmente. Ainda não há modelo de IA conectado — respondo por regras.";
-async function handle(text){text=text.trim();if(!text)return;bubble("u",text);
-try{
-if(pending){const p=pending;if(YES.test(text)){pending=null;return await confirm(p)}if(NO.test(text)){pending=null;return say("Tudo bem, não salvei.")}pending=null}
-let m;
-if(/^\/?ajuda$/i.test(text))return say(HELP);
-if(/^\/(backup|exportar)/i.test(text))return openSheet("bk");
-if(/^\/(memoria|conhecimento|documentos|projetos|configuracoes)/i.test(text)){openSheet(/config/.test(text)?"cf":"mem");return}
-if(/^(ol[aá]|oi|bom dia|boa tarde|boa noite)\b/i.test(text))return say(Cfg.v.formal==="formal"?"Olá. Estou à disposição.":"Olá! Estou pronta.");
-if(m=text.match(/^(?:me chamo|meu nome (?:é|e))\s+(.+)$/i))return ask({k:"mem",r:{id:uid(),tipo:"usuario",chave:"nome",valor:m[1].replace(/[.!]$/,""),origem:"conversa",data:today()}},"Quer que eu memorize essa informação?");
-if(m=text.match(/^prefiro\s+(.+)$/i))return ask({k:"mem",r:{id:uid(),tipo:"preferencia",chave:"preferência",valor:m[1],origem:"conversa",data:today()}},"Quer que eu guarde isso como preferência?");
-if(m=text.match(/^(meu|minha)\s+(.+?)\s+(?:é|e)\s+(.+)$/i))return ask({k:"mem",r:{id:uid(),tipo:"usuario",chave:m[2],valor:m[3].replace(/[.!]$/,""),origem:"conversa",data:today()}},"Quer que eu memorize essa informação?");
-if(m=text.match(/^qual\s+(?:é|e)\s+(?:o\s+|a\s+)?(?:meu|minha)\s+(.+?)\??$/i)){const k=norm(m[1]);const f=(await DB.all("memory")).filter(x=>norm(x.chave)===k||norm(x.chave).includes(k));
-return say(f.length?"Seu(sua) "+f[0].chave+" é "+f[0].valor+".":"Não tenho essa informação guardada. Quer me ensinar?")}
-if(m=text.match(/^(?:aprenda isso|memorize isso|guarde esta informa[cç][aã]o|aprenda este texto)\s*[:\-]?\s*([\s\S]*)$/i)){if(m[1].trim().length<3)return say("Cole o texto depois dos dois-pontos, ou use a aba Aprendizado (☰).");return learnText(m[1])}
-if(m=text.match(/^esque[cç]a\s+(?:esta informa[cç][aã]o\s*)?(?:sobre\s+)?(.+)$/i)){const r=await Search.mem(m[1].replace(/^(meu|minha)\s+/i,""),.5);const t=r.find(x=>x.tipoFonte!=="documento");
-if(!t)return say("Não encontrei nada guardado sobre isso.");return ask({k:"del",r:t},"Encontrei: “"+(t.chave||t.titulo)+": "+(t.valor||t.conteudo).slice(0,80)+"”. Devo esquecer?")}
-if(/mostre o que voc[eê] aprendeu|o que voc[eê] lembra\??$/i.test(text)){const a=[...await DB.all("memory"),...await DB.all("knowledge")];if(!a.length)return say("Ainda não guardei nada.");return say(a.slice(0,15).map(x=>"• "+(x.chave||x.titulo)+": "+(x.valor||x.conteudo).slice(0,90)).join("\n")+"\n\nVeja tudo em ☰ Memória.")}
-if(m=text.match(/^(?:procure|busque|pesquise)\s+(?:no|nos)?\s*(?:documentos?|arquivo)?\s*(?:a informa[cç][aã]o\s+)?(?:sobre|de|do|da)?\s*(.+)$/i)){const r=(await Search.docs(m[1])).slice(0,3);
-return say(r.length?"Encontrei:\n\n"+r.map(x=>"📄 "+x.nome+"\n“"+x.trecho.slice(0,260)+"…”").join("\n\n"):"Não encontrei esse assunto nos documentos armazenados.")}
-if(/^(quais|quantos)\s+documentos/i.test(text)){const d=await DB.all("docs");return say(d.length?d.map(x=>"• "+x.nome+" ("+x.chars+" caracteres)").join("\n"):"Nenhum documento importado.")}
-const r=(await Search.mem(text,.6)).slice(0,3);
-if(r.length)return say("Isto é o que tenho guardado sobre isso:\n\n"+r.map(x=>"• ["+x.tipoFonte+"] "+(x.chave?x.chave+": "+x.valor:x.titulo+" — "+x.conteudo.slice(0,200))).join("\n"));
-say("Ainda não tenho um modelo de IA conectado, então só entendo comandos de memória, aprendizado e busca. Digite /ajuda para ver o que posso fazer.")
-}catch(e){Log.add("handle",e);sys("Algo deu errado: "+e.message)}}
+const HELP="Modos: 💬 Conversar e 🧠 Treinar (aqui você ensina por texto, voz ou arquivo).\n\n• Memorizar: “Memorize que meu projeto se chama JORNADA”, “Seu nome é Rafinha”, “Prefiro respostas curtas”\n• Consultar: “Qual é meu nome?”, “O que você sabe sobre JORNADA?”\n• Ensinar: “Quero te ensinar sobre …” e depois texto ou 📎 arquivo\n• Esquecer: “Esqueça meu projeto”\n• Documentos: “procure no documento …”\n• /memoria, /backup, /treinamento\n\nHonestidade: interpreto por regras locais e guardo/busco textos neste aparelho. Ainda não há modelo de IA conectado.";
+const desc=i=>i.camada==="identidade"?"você quer que meu "+i.chave+" seja “"+i.valor+"”":i.categoria==="preferencia"?"uma preferência sua: "+i.valor:i.chave==="nome"?"seu nome é "+i.valor:"“"+i.chave+"” é “"+i.valor+"” ("+i.categoria+")";
 function ask(p,q){pending=p;say(q)}
-async function confirm(p){if(p.k==="mem"){await DB.put("memory",p.r);say("Informação armazenada.")}
-else if(p.k==="know"){await DB.put("knowledge",p.r);say("Adicionado ao conhecimento.")}
-else if(p.k==="del"){await DB.del(p.r.tipoFonte==="memória"?"memory":"knowledge",p.r.id);say("Esquecido.")}
-else if(p.k==="doc"){p.d.aprendido=true;await DB.put("docs",p.d);say("Conteúdo de “"+p.d.nome+"” adicionado ao conhecimento.")}}
-async function learnText(t){const dup=(await DB.all("knowledge")).find(k=>k.hash===hash(t));if(dup)return say("Já tenho esse texto no conhecimento (“"+dup.titulo+"”). Nada foi duplicado.");
-const res=await AIProvider.summarize(t),n=t.split(/(?<=[.!?])\s+/).filter(Boolean).length;
-const r={id:uid(),titulo:t.slice(0,40).trim()+"…",conteudo:t.trim(),origem:"texto colado",tipo:"texto",dataCriacao:today(),dataAtualizacao:today(),tags:tokens(t).slice(0,5),hash:hash(t)};
-ask({k:"know",r},"Analisei o conteúdo: "+t.length+" caracteres, cerca de "+n+" frases.\nResumo: "+res+"\n\nDeseja adicionar ao meu conhecimento?")}
-async function importFile(f){try{setSt("Lendo arquivo…");$("#dot").className="dot busy";const d=await Docs.process(f);const all=await DB.all("docs");
-const same=all.find(x=>x.hash===d.hash);if(same){return say("“"+f.name+"” já foi importado em "+same.data+". Ignorei para não duplicar.")}
-const ver=all.find(x=>x.nome===d.nome);await DB.put("docs",d);
-say("Recebi o documento “"+d.nome+"”. Extraí "+(d.paginas?d.paginas+" páginas e ":"")+d.chars+" caracteres em "+d.chunks.length+" trechos."+(ver?"\nJá existia uma versão com este nome e conteúdo diferente; mantive as duas.":"")+"\nJá posso pesquisar nele (“procure no documento …”). Deseja adicioná-lo ao meu conhecimento geral?");
-pending={k:"doc",d}}
-catch(e){Log.add("importar",e);sys("Não foi possível ler este arquivo: "+e.message)}finally{setSt("Pronta");$("#dot").className="dot"}}
+const Act={
+async ajuda(){say(HELP)},async backup(){openSheet("bk")},async painel(r){openSheet(r.painel)},async modo(r){switchMode(r.modo)},
+async saudacao(){say(Cfg.v.formal==="formal"?"Olá. Estou à disposição.":"Olá! Como posso ajudar?")},
+async estado(r){const v={estou:"Você está","tô":"Você está",to:"Você está","me sinto":"Você se sente",ando:"Você anda"}[r.verbo];say("Entendi. "+v+" "+toYou(r.resto)+".")},
+async memorizar(r,pre){ask({k:"mem",items:r.items,o:modo==="treino"?"treinamento":"conversa"},(pre||"Entendi: ")+r.items.map(desc).join("; ")+". Deseja que eu memorize isso?")},
+async informar(r){return Act.memorizar(r,"Percebi uma informação: ")},
+async esquecer(r){const h=(await Retrieve.find(r.assunto,3)).filter(x=>x.src!=="documento");if(!h.length)return say("Não encontrei nada guardado sobre isso.");ask({k:"del",x:h[0]},"Encontrei:\n"+fmt(h[0])+"\nDevo esquecer?")},
+async ensinar(r){Ctx.topico=r.assunto;say("Certo, vamos falar sobre “"+r.assunto+"”. Pode escrever, falar ou anexar um arquivo (📎). Eu mostro o que entendi e só salvo se você confirmar.")},
+async aprender_texto(r){return learnText(r.texto)},
+async consultar_identidade(){const i=(await DB.all("memory")).find(m=>m.camada==="identidade"&&m.chave==="nome");say("Meu nome é "+(i?i.valor:Cfg.v.nome)+".")},
+async consultar_usuario(r){const k=norm(r.chave),f=(await DB.all("memory")).filter(m=>m.camada!=="identidade"&&(norm(m.chave)===k||norm(m.chave).includes(k)));say(f.length?"Seu(sua) "+f[0].chave+" é "+f[0].valor+".":"Não tenho essa informação guardada. Quer me ensinar?")},
+async consultar_assunto(r){let q=r.assunto;if(/^(ele|ela|isso|aquilo|isto)$/i.test(q)&&Ctx.topico)q=Ctx.topico;Ctx.topico=q;const h=await Retrieve.find(q,6);
+say(h.length?"Sobre “"+q+"” eu tenho:\n\n"+h.map(fmt).join("\n"):"Ainda não aprendi nada sobre “"+q+"”. Se quiser, me ensine no Modo Treinamento.")},
+async mostrar(){const a=[...await DB.all("memory"),...await DB.all("knowledge")];if(!a.length)return say("Ainda não guardei nada.");say(a.slice(0,15).map(x=>"• ["+(x.camada||"usuario")+"] "+(x.chave||x.assunto||x.titulo)+": "+String(x.valor||x.conteudo).slice(0,90)).join("\n")+"\n\nVeja tudo, com origem e importância, em ☰ Memória.")},
+async buscar_doc(r){const h=(await Search.docs(r.assunto)).slice(0,3);say(h.length?"Encontrei:\n\n"+h.map(x=>"📄 "+x.nome+"\n“"+x.trecho.slice(0,260)+"…”").join("\n\n"):"Não encontrei esse assunto nos documentos armazenados.")},
+async listar_docs(){const d=await DB.all("docs");say(d.length?d.map(x=>"• "+x.nome+" ("+x.chars+" caracteres"+(x.aprendido?", no conhecimento":"")+")").join("\n"):"Nenhum documento importado.")},
+async conversar(r){if(r.aviso)return say(r.aviso);
+if(modo==="treino"&&r.tipo==="afirmacao"&&r.t.length>=25)return learnText(r.t);
+const h=r.tipo==="pergunta"||r.ref?await Retrieve.find(r.t+(r.ref&&Ctx.topico?" "+Ctx.topico:""),3):[];
+if(h.length)return say("Isto é o que tenho guardado:\n\n"+h.map(fmt).join("\n"));
+say(r.tipo==="pergunta"?"Não encontrei nada guardado sobre isso. Ainda não tenho um modelo de IA conectado para responder de outra forma.":"Certo — usei isso só como contexto da conversa, sem guardar na memória. Para guardar, diga “memorize isso”.")}};
+async function doConfirm(p){if(p.k==="mem"){const out=[];for(const it of p.items){const s=await Mem.save(it,p.o);out.push(s.st==="novo"?"Informação armazenada: "+it.chave+" = "+it.valor+".":s.st==="atualizado"?"Atualizei “"+it.chave+"”: de “"+s.de+"” para “"+it.valor+"”.":"Eu já sabia: "+it.chave+" = "+it.valor+".")}say(out.join("\n"))}
+else if(p.k==="know"){await DB.put("knowledge",p.rec);Sess.saved++;say("Aprendido: “"+p.rec.assunto+"”. Origem: "+p.rec.origem+".")}
+else if(p.k==="del"){await DB.del({"memória":"memory","conhecimento":"knowledge","episódio":"episodes"}[p.x.src],p.x.rec.id);say("Esquecido.")}
+else if(p.k==="doc"){p.d.aprendido=true;await DB.put("docs",p.d);const k=knRec(p.a,"documento: "+p.d.nome,p.d.hash);k.docId=p.d.id;await DB.put("knowledge",k);Sess.saved++;say("Aprendi o conteúdo de “"+p.d.nome+"” sobre “"+p.a.assunto+"”.")}}
+async function handle(text){text=text.trim();if(!text)return;bubble("u",text);Ctx.push("u",text);Sess.n++;kw(text,3).forEach(w=>Sess.tok[w]=(Sess.tok[w]||0)+1);
+try{if(pending){const p=pending;pending=null;if(YES.test(text))return await doConfirm(p);if(NO.test(text))return say("Tudo bem, não salvei.")}
+const r=Core.interpret(text,Ctx);Log.add("interpretado: "+r.tipo+" / "+r.intencao+" / "+r.temporal);
+return await(Act[r.intencao]||Act.conversar)(r)}catch(e){Log.add("handle",e);sys("Algo deu errado: "+e.message)}}
+async function switchMode(m,first){if(!first)await Episodes.consolidate();modo=m;Sess.mode=m;pending=null;Ctx.recent=[];chat.innerHTML="";
+$("#mChat").className=m==="chat"?"on":"";$("#mTr").className=m==="treino"?"on":"";$("#trB").style.display=m==="treino"?"block":"none";$("#in").placeholder=m==="treino"?"Ensine algo à "+Cfg.v.nome+"…":"Escreva uma mensagem…";
+const h=(await DB.all("messages")).filter(x=>(x.modo||"chat")===m).sort((a,b)=>a.t-b.t).slice(-40);h.forEach(x=>{bubble(x.role,x.text,false);Ctx.push(x.role,x.text)});
+if(!h.length){if(m==="treino")sys("Comece com “Quero te ensinar sobre …”. Depois escreva, fale 🎙 ou anexe 📎 um arquivo.");else say("Olá! Sou a "+Cfg.v.nome+". Tudo o que guardo fica só neste aparelho. Digite /ajuda.")}}
 /* ===== painel: memória, aprendizado, backup, config, diagnóstico ===== */
 const TABS={mem:"Memória",apr:"Aprendizado",bk:"Backup",cf:"Config",dg:"Diagnóstico"};
 function openSheet(t="mem"){$("#sheet").style.display="flex";$("#tabs").innerHTML="";for(const k in TABS){const b=document.createElement("button");b.textContent=TABS[k];b.className=k===t?"on":"";b.onclick=()=>openSheet(k);$("#tabs").appendChild(b)}({mem:tMem,apr:tApr,bk:tBk,cf:tCf,dg:tDg})[t]()}
@@ -174,14 +251,17 @@ const B=()=>{const b=$("#body");b.innerHTML="";return b};
 const el=(h,p)=>{const d=document.createElement("div");d.className="it";d.innerHTML=h;(p||$("#body")).appendChild(d);return d};
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 function btn(p,t,f){const b=document.createElement("button");b.textContent=t;b.onclick=f;p.appendChild(b);return b}
-async function tMem(){const b=B();const q=document.createElement("input");q.placeholder="Pesquisar…";b.appendChild(q);const box=document.createElement("div");box.style.cssText="display:flex;flex-direction:column;gap:10px";b.appendChild(box);
+async function tMem(){const b=B(),q=document.createElement("input"),sl=document.createElement("select");q.placeholder="Pesquisar…";
+sl.innerHTML='<option value="">Todas as camadas</option><option value="identidade">Identidade</option><option value="usuario">Usuário</option><option value="conhecimento">Conhecimento</option><option value="episodica">Episódica</option><option value="documento">Documentos</option>';b.append(q,sl);
+const box=document.createElement("div");box.style.cssText="display:flex;flex-direction:column;gap:10px";b.appendChild(box);
 async function draw(){box.innerHTML="";const f=norm(q.value);
-const rows=[...(await DB.all("memory")).map(x=>({s:"memory",x,t:"Memória · "+x.tipo,h:x.chave,v:x.valor})),...(await DB.all("knowledge")).map(x=>({s:"knowledge",x,t:"Conhecimento · "+x.origem,h:x.titulo,v:x.conteudo})),...(await DB.all("docs")).map(x=>({s:"docs",x,t:"Documento · "+x.tipo+(x.aprendido?" · no conhecimento":""),h:x.nome,v:x.chars+" caracteres, "+x.chunks.length+" trechos · importado em "+x.data}))].filter(r=>!f||norm(r.h+r.v).includes(f));
+const rows=[...(await DB.all("memory")).map(x=>({s:"memory",x,c:x.camada||"usuario",h:x.chave,v:x.valor})),...(await DB.all("knowledge")).map(x=>({s:"knowledge",x,c:"conhecimento",h:x.assunto||x.titulo,v:x.valor||x.conteudo||""})),...(await DB.all("episodes")).map(x=>({s:"episodes",x,c:"episodica",h:"Lembrança de "+x.criadoEm,v:x.resumo})),...(await DB.all("docs")).map(x=>({s:"docs",x,c:"documento",h:x.nome,v:x.chars+" caracteres, "+x.chunks.length+" trechos"+(x.aprendido?" · no conhecimento":"")}))].filter(r=>(!sl.value||r.c===sl.value)&&(!f||norm(r.h+" "+r.v).includes(f)));
 if(!rows.length)box.innerHTML='<div class="it">Nada armazenado ainda.</div>';
-rows.forEach(r=>{const d=el("<small>"+esc(r.t)+"</small><b>"+esc(r.h)+"</b><div>"+esc(r.v.slice(0,300))+"</div><div class='row'></div>",box);const row=d.querySelector(".row");
-if(r.s!=="docs")btn(row,"Editar",async()=>{const n=prompt("Novo valor:",r.v);if(n!==null){r.x[r.s==="memory"?"valor":"conteudo"]=n;await DB.put(r.s,r.x);draw()}});
-btn(row,"Excluir",async()=>{if(confirm("Excluir?")){await DB.del(r.s,r.x.id);draw()}})})}
-q.oninput=draw;draw()}
+rows.forEach(r=>{const x=r.x,meta=[x.origem,x.atualizadoEm||x.criadoEm||x.data,x.importancia!=null?"importância "+x.importancia+"/10":"",x.usos?"usada "+x.usos+"x":"",x.anterior&&x.anterior.length?"atualizada "+x.anterior.length+"x":""].filter(Boolean).join(" · ");
+const d=el("<small>"+esc(r.c+(x.categoria?" · "+x.categoria:""))+"</small><b>"+esc(r.h)+"</b><div>"+esc(String(r.v).slice(0,300))+"</div><small>"+esc(meta)+"</small><div class='row'></div>",box),row=d.querySelector(".row");
+if(r.s!=="docs")btn(row,"Editar",async()=>{const k=r.s==="episodes"?"resumo":(r.s==="knowledge"&&x.valor===undefined?"conteudo":"valor"),n=prompt("Novo valor:",r.v);if(n!==null){x[k]=n;x.atualizadoEm=today();await DB.put(r.s,x);draw()}});
+btn(row,"Excluir",async()=>{if(window.confirm("Excluir?")){await DB.del(r.s,x.id);draw()}})})}
+q.oninput=draw;sl.onchange=draw;draw()}
 function tApr(){const b=B();el("<b>Ensinar a assistente</b><small>Cole um texto ou envie um arquivo. Você revisa o resumo e confirma antes de salvar.</small>");
 const t=document.createElement("textarea");t.rows=8;t.placeholder="Cole o texto aqui…";b.appendChild(t);
 btn(b,"Analisar texto",()=>{if(t.value.trim().length<3)return;$("#sheet").style.display="none";learnText(t.value)}).className="pri";
@@ -195,12 +275,12 @@ f.onchange=async()=>{try{const n=await DB.importAll(JSON.parse(await f.files[0].
 function tCf(){const b=B(),c=Cfg.v;const d=el(`<label>Nome da assistente<input id="c1" value="${esc(c.nome)}"></label>
 <label>Formalidade<select id="c2"><option value="informal">Informal</option><option value="formal">Formal</option></select></label>
 <label>Tamanho das respostas<select id="c3"><option value="curtas">Curtas</option><option value="detalhadas">Detalhadas</option></select></label>
-<label>Voz<select id="c4"><option value="">Padrão do aparelho</option>${Voice.voices().map(v=>`<option>${esc(v.name)}</option>`).join("")}</select></label>
+<label>Voz<select id="c4"><option value="">Automática (feminina, jovem)</option>${Voice.voices().map(v=>`<option>${esc(v.name)}</option>`).join("")}</select></label>
 <label>Instruções principais (guardadas para o futuro provedor de IA)<textarea id="c5" rows="3">${esc(c.instr)}</textarea></label>
 <label class="ck"><input type="checkbox" id="c6" ${c.auto?"checked":""}>Falar respostas automaticamente</label>
 <label class="ck"><input type="checkbox" id="c7" ${c.dev?"checked":""}>Modo desenvolvedor</label>`);
 d.style.cssText="display:flex;flex-direction:column;gap:12px";$("#c2").value=c.formal;$("#c3").value=c.tamanho;$("#c4").value=c.voz;
-d.onchange=d.oninput=async()=>{Object.assign(c,{nome:$("#c1").value||"Aurora",formal:$("#c2").value,tamanho:$("#c3").value,voz:$("#c4").value,instr:$("#c5").value,auto:$("#c6").checked,dev:$("#c7").checked});await Cfg.save();applyCfg()}}
+d.onchange=d.oninput=async()=>{Object.assign(c,{nome:$("#c1").value||"Rafinha",formal:$("#c2").value,tamanho:$("#c3").value,voz:$("#c4").value,instr:$("#c5").value,auto:$("#c6").checked,dev:$("#c7").checked});await Cfg.save();applyCfg()}}
 async function tDg(){const b=B();const ck=async n=>{try{await navigator.mediaDevices.enumerateDevices();return n}catch{return null}};
 const dev=navigator.mediaDevices?await navigator.mediaDevices.enumerateDevices():[];
 const rows=[["IndexedDB",!!window.indexedDB],["Speech Recognition",Voice.ok()],["Speech Synthesis",Voice.synOk()],["File System Access (pasta própria — ainda não usada)",!!window.showDirectoryPicker],["Service Worker",!!navigator.serviceWorker],["Câmera (dispositivo detectado)",dev.some(d=>d.kind==="videoinput")],["Microfone (dispositivo detectado)",dev.some(d=>d.kind==="audioinput")],["Armazenamento persistente",!!(navigator.storage&&navigator.storage.persist)],["Biblioteca PDF (pdf.js)",!!window.pdfjsLib],["Android",AndroidBridge.isAvailable()]];
@@ -217,14 +297,15 @@ $("#in").addEventListener("input",e=>{e.target.style.height="auto";e.target.styl
 $("#bMic").onclick=()=>{if(Voice.active())return Voice.cancel();
 $("#dot").className="dot on";setSt("● Ouvindo… (toque no microfone para cancelar)");
 Voice.listen(t=>$("#in").value=t,f=>{$("#dot").className="dot";setSt("Pronta");if(f)send()})};
-$("#bAtt").onclick=()=>$("#file").click();
+$("#bAtt").onclick=()=>{if(modo!=="treino"){switchMode("treino");sys("Arquivos são ensinados no Modo Treinamento.")}$("#file").click()};
 $("#file").onchange=e=>{const f=e.target.files[0];e.target.value="";if(f){bubble("u","📎 "+f.name);importFile(f)}};
+$("#mChat").onclick=()=>switchMode("chat");$("#mTr").onclick=()=>switchMode("treino");
 $("#bMem").onclick=()=>openSheet("mem");$("#bClose").onclick=()=>$("#sheet").style.display="none";
 $("#sp1").onclick=()=>speechSynthesis.pause();$("#sp2").onclick=()=>speechSynthesis.resume();$("#sp3").onclick=()=>speechSynthesis.cancel();
+document.addEventListener("visibilitychange",()=>{if(document.hidden)Episodes.consolidate().catch(()=>{})});
 /* ===== início ===== */
-(async()=>{try{await DB.open();await Cfg.load();applyCfg();
-const h=(await DB.all("messages")).sort((a,b)=>a.t-b.t).slice(-40);h.forEach(m=>bubble(m.role,m.text,false));
-if(!h.length)say("Olá! Sou a "+Cfg.v.nome+". Tudo o que eu guardo fica só neste aparelho. Digite /ajuda para ver o que sei fazer.");
+(async()=>{try{await DB.open();await Cfg.load();if(Cfg.v.nome==="Aurora")Cfg.v.nome="Rafinha";
+const idn=(await DB.all("memory")).find(m=>m.camada==="identidade"&&m.chave==="nome");if(idn)Cfg.v.nome=idn.valor;applyCfg();await switchMode("chat",true);
 if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{})}
 catch(e){Log.add("init",e);sys("Banco local indisponível: "+e.message+". Nada será salvo nesta sessão.")}})();
 </script></body></html>
