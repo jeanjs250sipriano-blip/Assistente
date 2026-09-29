@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Assistente</title>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--tx:#1b1d2a;--mut:#6b7086;--ac:#5b5bd6;--u:#5b5bd6;--ut:#fff;--a:#fff;--bd:#e3e5ef;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12131a;--card:#1c1e29;--tx:#eceef7;--mut:#9095ad;--a:#1c1e29;--bd:#2b2e3d}}
+:root[data-theme="dark"]{--bg:#12131a;--card:#1c1e29;--tx:#eceef7;--mut:#9095ad;--a:#1c1e29;--bd:#2b2e3d}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column}
+header{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--card);border-bottom:1px solid var(--bd)}
+.dot{width:10px;height:10px;border-radius:50%;background:#3bb273}.dot.on{background:#e5484d;animation:p 1s infinite}.dot.busy{background:#f5a524}
+@keyframes p{50%{opacity:.35}}
+header b{font-size:17px}header small{color:var(--mut);flex:1}
+button{font:inherit;color:inherit;background:none;border:1px solid var(--bd);border-radius:12px;padding:8px 12px;cursor:pointer}
+button.ic{width:42px;height:42px;padding:0;font-size:18px;flex:none}
+button.pri{background:var(--ac);color:#fff;border-color:var(--ac)}
+#chat{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+.m{max-width:86%;padding:10px 13px;border-radius:16px;white-space:pre-wrap;word-wrap:break-word;border:1px solid var(--bd)}
+.m.u{align-self:flex-end;background:var(--u);color:var(--ut);border-color:var(--u);border-bottom-right-radius:4px}
+.m.a{align-self:flex-start;background:var(--a);border-bottom-left-radius:4px}
+.m.s{align-self:center;font-size:13px;color:var(--mut);background:none;border-style:dashed}
+.m .sp{display:block;margin-top:6px;font-size:12px;color:var(--mut);cursor:pointer}
+#spk{display:none;gap:6px;padding:6px 14px;background:var(--card);border-top:1px solid var(--bd)}
+#bar{display:flex;gap:6px;padding:10px;background:var(--card);border-top:1px solid var(--bd);align-items:flex-end}
+textarea,input,select{font:inherit;color:var(--tx);background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:10px;width:100%}
+#in{flex:1;resize:none;max-height:120px}
+#sheet{position:fixed;inset:0;background:var(--bg);display:none;flex-direction:column;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+#tabs{display:flex;gap:6px;padding:10px;overflow-x:auto;border-bottom:1px solid var(--bd)}
+#tabs button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+#body{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+.it{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:10px}
+.it small{color:var(--mut);display:block}.row{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--mut)}
+label.ck{flex-direction:row;align-items:center;gap:8px;color:var(--tx);font-size:15px}label.ck input{width:auto}
+pre{white-space:pre-wrap;font-size:12px;margin:0}
+</style></head><body>
+<header><span class="dot" id="dot"></span><div style="flex:1"><b id="nm">Assistente</b><br><small id="st">Pronta</small></div>
+<button class="ic" id="bMem" title="Memória e configurações">☰</button></header>
+<div id="chat"></div>
+<div id="spk"><button id="sp1">⏸ Pausar</button><button id="sp2">▶ Continuar</button><button id="sp3">⏹ Parar</button></div>
+<div id="bar">
+<button class="ic" id="bAtt" title="Anexar arquivo">📎</button>
+<textarea id="in" rows="1" placeholder="Escreva uma mensagem…"></textarea>
+<button class="ic" id="bMic" title="Falar">🎙</button>
+<button class="ic pri" id="bSend" title="Enviar">➤</button>
+<input type="file" id="file" hidden accept=".txt,.md,.json,.csv,.html,.htm,.pdf"></div>
+<div id="sheet"><div id="tabs"></div><div id="body"></div>
+<div style="padding:10px"><button style="width:100%" id="bClose">Voltar à conversa</button></div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+"use strict";
+/* ===== util ===== */
+const $=s=>document.querySelector(s);
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const norm=s=>(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+const hash=s=>{let h=5381;for(let i=0;i<s.length;i++)h=((h<<5)+h+s.charCodeAt(i))|0;return String(h)};
+const today=()=>new Date().toISOString().slice(0,10);
+const Log={items:[],add(t,e){this.items.push(new Date().toLocaleTimeString()+" "+t+(e?" – "+(e.message||e):""));if(this.items.length>200)this.items.shift()}};
+/* ===== banco (camada única sobre IndexedDB) ===== */
+const DB=(()=>{let db;const S=["memory","knowledge","docs","messages","settings"];
+const open=()=>new Promise((ok,no)=>{if(!window.indexedDB)return no(new Error("IndexedDB indisponível"));const r=indexedDB.open("assistente",1);
+r.onupgradeneeded=()=>S.forEach(s=>r.result.createObjectStore(s,{keyPath:"id"}));r.onsuccess=()=>{db=r.result;ok()};r.onerror=()=>no(r.error)});
+const tx=(s,m,f)=>new Promise((ok,no)=>{const t=db.transaction(s,m),q=f(t.objectStore(s));t.oncomplete=()=>ok(q&&q.result);t.onerror=()=>no(t.error)});
+return{open,put:(s,o)=>tx(s,"readwrite",x=>x.put(o)),all:s=>tx(s,"readonly",x=>x.getAll()),del:(s,id)=>tx(s,"readwrite",x=>x.delete(id)),
+async exportAll(k){const o={versao:1,exportadoEm:new Date().toISOString()};for(const s of(k?[k]:S))o[s]=await this.all(s);return o},
+async importAll(o){let n=0;for(const s of S)for(const r of(o[s]||[])){if(r&&r.id){await this.put(s,r);n++}}return n}}})();
+/* ===== configurações / personalidade ===== */
+const Cfg={v:{id:"cfg",nome:"Aurora",formal:"informal",tamanho:"curtas",voz:"",auto:false,dev:false,instr:""},
+async load(){const all=await DB.all("settings");const c=all.find(x=>x.id==="cfg");if(c)Object.assign(this.v,c)},save(){return DB.put("settings",this.v)}};
+/* ===== busca textual local ===== */
+const tokens=s=>norm(s).split(/[^a-z0-9]+/).filter(w=>w.length>2);
+function score(q,t){const T=norm(t);let s=0;for(const w of q)if(T.includes(w))s++;return q.length?s/q.length:0}
+const Search={async mem(q,min=.5){const Q=tokens(q);const r=[];
+for(const m of await DB.all("memory"))r.push({...m,tipoFonte:"memória",sc:score(Q,m.chave+" "+m.valor)});
+for(const k of await DB.all("knowledge"))r.push({...k,tipoFonte:"conhecimento",sc:score(Q,k.titulo+" "+k.conteudo)});
+for(const d of await DB.all("docs"))if(d.aprendido)d.chunks.forEach((c,i)=>r.push({id:d.id,titulo:d.nome,conteudo:c,tipoFonte:"documento",sc:score(Q,c)}));
+return r.filter(x=>x.sc>=min).sort((a,b)=>b.sc-a.sc)},
+async docs(q){const Q=tokens(q),r=[];for(const d of await DB.all("docs"))d.chunks.forEach((c,i)=>{const s=score(Q,c);if(s>=.5)r.push({nome:d.nome,trecho:c,sc:s,i})});return r.sort((a,b)=>b.sc-a.sc)}};
+/* ===== documentos ===== */
+const Docs=(()=>{const MAX=15*1024*1024,EXT=["txt","md","json","csv","html","htm","pdf"];
+const chunk=(t,n=1000)=>{const out=[];let i=0;while(i<t.length){let e=Math.min(i+n,t.length);if(e<t.length){const b=t.lastIndexOf(". ",e);if(b>i+n*.5)e=b+1}out.push(t.slice(i,e).trim());i=e}return out.filter(Boolean)};
+async function pdf(buf){if(!window.pdfjsLib)throw new Error("Biblioteca de PDF não carregou (sem internet?)");
+pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+const d=await pdfjsLib.getDocument({data:buf}).promise;let t="";for(let p=1;p<=d.numPages;p++){const c=await(await d.getPage(p)).getTextContent();t+=c.items.map(i=>i.str).join(" ")+"\n"}return{text:t,paginas:d.numPages}}
+async function process(f){const ext=(f.name.split(".").pop()||"").toLowerCase();
+if(!EXT.includes(ext))throw new Error("Tipo não suportado (.\u200b"+ext+"). Use TXT, MD, JSON, CSV, HTML ou PDF.");
+if(f.size>MAX)throw new Error("Arquivo maior que 15 MB.");
+let text,paginas=null;
+if(ext==="pdf"){const r=await pdf(await f.arrayBuffer());text=r.text;paginas=r.paginas}
+else{text=await f.text();if(ext==="html"||ext==="htm")text=new DOMParser().parseFromString(text,"text/html").body.textContent}
+text=text.replace(/[ \t]+/g," ").replace(/\n{3,}/g,"\n\n").trim();
+if(!text)throw new Error("Não encontrei texto neste arquivo (PDF escaneado precisa de OCR, ainda não disponível).");
+return{id:uid(),nome:f.name,tipo:ext,hash:hash(text),chars:text.length,paginas,chunks:chunk(text),aprendido:false,data:today()}}
+return{process}})();
+/* ===== IA (interface trocável; provedor local por regras, sem modelo) ===== */
+const AIProvider={nome:"LocalRules",async generateResponse(){return null},async summarize(t){const s=t.split(/(?<=[.!?])\s+/).filter(Boolean);return s.slice(0,2).join(" ").slice(0,220)},
+async classify(t){return/^(meu|minha|me chamo)/i.test(t)?"memoria":/^prefiro/i.test(t)?"preferencia":"conversa"},async extractMemory(){return[]},async analyzeDocument(d){return{resumo:d.chunks[0].slice(0,200)}}};
+/* ===== Android / Sync / Ferramentas (preparados) ===== */
+const AndroidBridge={isAvailable:()=>false,_n(){return"Recurso disponível somente na versão Android."},flashlightOn(){return this._n()},flashlightOff(){return this._n()},setBrightness(){return this._n()},setVolume(){return this._n()},openApplication(){return this._n()},lockScreen(){return this._n()}};
+const SyncProvider={ativo:false,nome:"Local (sincronização desativada)"};
+const Tools={list:{},register(n,d,f){this.list[n]={d,f}},run(n,a){Log.add("ferramenta "+n);return this.list[n].f(a)}};
+Tools.register("memoria.buscar","Busca na memória e conhecimento",q=>Search.mem(q));
+Tools.register("documentos.buscar","Busca em documentos",q=>Search.docs(q));
+/* ===== voz ===== */
+const Voice=(()=>{const SR=window.SpeechRecognition||window.webkitSpeechRecognition;let rec=null;
+const ok=()=>!!SR,synOk=()=>"speechSynthesis"in window;
+function listen(onText,onEnd){if(!SR)return sys("Este navegador não oferece suporte a reconhecimento de voz.");
+rec=new SR();rec.lang="pt-BR";rec.interimResults=true;let fin="";
+rec.onresult=e=>{let t="";for(const r of e.results)t+=r[0].transcript;fin=t;onText(t)};
+rec.onerror=e=>{Log.add("voz erro",e.error);sys(e.error==="not-allowed"?"Não foi possível acessar o microfone (permissão negada).":"Erro no reconhecimento de voz: "+e.error)};
+rec.onend=()=>{rec=null;onEnd(fin)};try{rec.start()}catch(e){sys("Não foi possível iniciar o microfone.")}}
+const cancel=()=>{if(rec){rec.onend=()=>{rec=null;setSt("Pronta");$("#dot").className="dot"};rec.abort()}};
+function speak(t){if(!synOk())return sys("Este navegador não oferece síntese de voz.");speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang="pt-BR";
+const v=speechSynthesis.getVoices().find(v=>v.name===Cfg.v.voz);if(v)u.voice=v;u.onstart=()=>$("#spk").style.display="flex";u.onend=u.onerror=()=>$("#spk").style.display="none";speechSynthesis.speak(u)}
+return{ok,synOk,listen,cancel,speak,active:()=>!!rec,voices:()=>synOk()?speechSynthesis.getVoices().filter(v=>v.lang.startsWith("pt")):[]}})();
+/* ===== interface de chat ===== */
+const chat=$("#chat");
+function setSt(t){$("#st").textContent=t}
+function bubble(role,text,save=true){const d=document.createElement("div");d.className="m "+role;d.textContent=text;
+if(role==="a"){const s=document.createElement("span");s.className="sp";s.textContent="🔊 ouvir";s.onclick=()=>Voice.speak(text);d.appendChild(s)}
+chat.appendChild(d);chat.scrollTop=chat.scrollHeight;
+if(save&&role!=="s")DB.put("messages",{id:Date.now().toString(36)+Math.random().toString(36).slice(2,4),role,text,t:Date.now()}).catch(e=>Log.add("salvar msg",e))}
+const sys=t=>bubble("s",t,false);
+function say(t){bubble("a",t);if(Cfg.v.auto)Voice.speak(t)}
+/* ===== assistente: interpretação e aprendizado ===== */
+let pending=null;
+const YES=/^(sim|s|pode|confirmo|confirmar|ok|claro|isso)\b/i,NO=/^(n[aã]o|cancela|deixa)/i;
+const HELP="Posso:\n• Memorizar: “Meu nome é João”, “Minha cor favorita é azul”, “Prefiro respostas curtas”\n• Consultar: “Qual é meu nome?”\n• Aprender: “Aprenda isso: …” (com sua confirmação)\n• Esquecer: “Esqueça meu nome”\n• Documentos: anexe um arquivo (📎) e peça “procure no documento …”\n• “Mostre o que você aprendeu”, “/backup”\n\nHonestidade: eu guardo e busco textos localmente. Ainda não há modelo de IA conectado — respondo por regras.";
+async function handle(text){text=text.trim();if(!text)return;bubble("u",text);
+try{
+if(pending){const p=pending;if(YES.test(text)){pending=null;return await confirm(p)}if(NO.test(text)){pending=null;return say("Tudo bem, não salvei.")}pending=null}
+let m;
+if(/^\/?ajuda$/i.test(text))return say(HELP);
+if(/^\/(backup|exportar)/i.test(text))return openSheet("bk");
+if(/^\/(memoria|conhecimento|documentos|projetos|configuracoes)/i.test(text)){openSheet(/config/.test(text)?"cf":"mem");return}
+if(/^(ol[aá]|oi|bom dia|boa tarde|boa noite)\b/i.test(text))return say(Cfg.v.formal==="formal"?"Olá. Estou à disposição.":"Olá! Estou pronta.");
+if(m=text.match(/^(?:me chamo|meu nome (?:é|e))\s+(.+)$/i))return ask({k:"mem",r:{id:uid(),tipo:"usuario",chave:"nome",valor:m[1].replace(/[.!]$/,""),origem:"conversa",data:today()}},"Quer que eu memorize essa informação?");
+if(m=text.match(/^prefiro\s+(.+)$/i))return ask({k:"mem",r:{id:uid(),tipo:"preferencia",chave:"preferência",valor:m[1],origem:"conversa",data:today()}},"Quer que eu guarde isso como preferência?");
+if(m=text.match(/^(meu|minha)\s+(.+?)\s+(?:é|e)\s+(.+)$/i))return ask({k:"mem",r:{id:uid(),tipo:"usuario",chave:m[2],valor:m[3].replace(/[.!]$/,""),origem:"conversa",data:today()}},"Quer que eu memorize essa informação?");
+if(m=text.match(/^qual\s+(?:é|e)\s+(?:o\s+|a\s+)?(?:meu|minha)\s+(.+?)\??$/i)){const k=norm(m[1]);const f=(await DB.all("memory")).filter(x=>norm(x.chave)===k||norm(x.chave).includes(k));
+return say(f.length?"Seu(sua) "+f[0].chave+" é "+f[0].valor+".":"Não tenho essa informação guardada. Quer me ensinar?")}
+if(m=text.match(/^(?:aprenda isso|memorize isso|guarde esta informa[cç][aã]o|aprenda este texto)\s*[:\-]?\s*([\s\S]*)$/i)){if(m[1].trim().length<3)return say("Cole o texto depois dos dois-pontos, ou use a aba Aprendizado (☰).");return learnText(m[1])}
+if(m=text.match(/^esque[cç]a\s+(?:esta informa[cç][aã]o\s*)?(?:sobre\s+)?(.+)$/i)){const r=await Search.mem(m[1].replace(/^(meu|minha)\s+/i,""),.5);const t=r.find(x=>x.tipoFonte!=="documento");
+if(!t)return say("Não encontrei nada guardado sobre isso.");return ask({k:"del",r:t},"Encontrei: “"+(t.chave||t.titulo)+": "+(t.valor||t.conteudo).slice(0,80)+"”. Devo esquecer?")}
+if(/mostre o que voc[eê] aprendeu|o que voc[eê] lembra\??$/i.test(text)){const a=[...await DB.all("memory"),...await DB.all("knowledge")];if(!a.length)return say("Ainda não guardei nada.");return say(a.slice(0,15).map(x=>"• "+(x.chave||x.titulo)+": "+(x.valor||x.conteudo).slice(0,90)).join("\n")+"\n\nVeja tudo em ☰ Memória.")}
+if(m=text.match(/^(?:procure|busque|pesquise)\s+(?:no|nos)?\s*(?:documentos?|arquivo)?\s*(?:a informa[cç][aã]o\s+)?(?:sobre|de|do|da)?\s*(.+)$/i)){const r=(await Search.docs(m[1])).slice(0,3);
+return say(r.length?"Encontrei:\n\n"+r.map(x=>"📄 "+x.nome+"\n“"+x.trecho.slice(0,260)+"…”").join("\n\n"):"Não encontrei esse assunto nos documentos armazenados.")}
+if(/^(quais|quantos)\s+documentos/i.test(text)){const d=await DB.all("docs");return say(d.length?d.map(x=>"• "+x.nome+" ("+x.chars+" caracteres)").join("\n"):"Nenhum documento importado.")}
+const r=(await Search.mem(text,.6)).slice(0,3);
+if(r.length)return say("Isto é o que tenho guardado sobre isso:\n\n"+r.map(x=>"• ["+x.tipoFonte+"] "+(x.chave?x.chave+": "+x.valor:x.titulo+" — "+x.conteudo.slice(0,200))).join("\n"));
+say("Ainda não tenho um modelo de IA conectado, então só entendo comandos de memória, aprendizado e busca. Digite /ajuda para ver o que posso fazer.")
+}catch(e){Log.add("handle",e);sys("Algo deu errado: "+e.message)}}
+function ask(p,q){pending=p;say(q)}
+async function confirm(p){if(p.k==="mem"){await DB.put("memory",p.r);say("Informação armazenada.")}
+else if(p.k==="know"){await DB.put("knowledge",p.r);say("Adicionado ao conhecimento.")}
+else if(p.k==="del"){await DB.del(p.r.tipoFonte==="memória"?"memory":"knowledge",p.r.id);say("Esquecido.")}
+else if(p.k==="doc"){p.d.aprendido=true;await DB.put("docs",p.d);say("Conteúdo de “"+p.d.nome+"” adicionado ao conhecimento.")}}
+async function learnText(t){const dup=(await DB.all("knowledge")).find(k=>k.hash===hash(t));if(dup)return say("Já tenho esse texto no conhecimento (“"+dup.titulo+"”). Nada foi duplicado.");
+const res=await AIProvider.summarize(t),n=t.split(/(?<=[.!?])\s+/).filter(Boolean).length;
+const r={id:uid(),titulo:t.slice(0,40).trim()+"…",conteudo:t.trim(),origem:"texto colado",tipo:"texto",dataCriacao:today(),dataAtualizacao:today(),tags:tokens(t).slice(0,5),hash:hash(t)};
+ask({k:"know",r},"Analisei o conteúdo: "+t.length+" caracteres, cerca de "+n+" frases.\nResumo: "+res+"\n\nDeseja adicionar ao meu conhecimento?")}
+async function importFile(f){try{setSt("Lendo arquivo…");$("#dot").className="dot busy";const d=await Docs.process(f);const all=await DB.all("docs");
+const same=all.find(x=>x.hash===d.hash);if(same){return say("“"+f.name+"” já foi importado em "+same.data+". Ignorei para não duplicar.")}
+const ver=all.find(x=>x.nome===d.nome);await DB.put("docs",d);
+say("Recebi o documento “"+d.nome+"”. Extraí "+(d.paginas?d.paginas+" páginas e ":"")+d.chars+" caracteres em "+d.chunks.length+" trechos."+(ver?"\nJá existia uma versão com este nome e conteúdo diferente; mantive as duas.":"")+"\nJá posso pesquisar nele (“procure no documento …”). Deseja adicioná-lo ao meu conhecimento geral?");
+pending={k:"doc",d}}
+catch(e){Log.add("importar",e);sys("Não foi possível ler este arquivo: "+e.message)}finally{setSt("Pronta");$("#dot").className="dot"}}
+/* ===== painel: memória, aprendizado, backup, config, diagnóstico ===== */
+const TABS={mem:"Memória",apr:"Aprendizado",bk:"Backup",cf:"Config",dg:"Diagnóstico"};
+function openSheet(t="mem"){$("#sheet").style.display="flex";$("#tabs").innerHTML="";for(const k in TABS){const b=document.createElement("button");b.textContent=TABS[k];b.className=k===t?"on":"";b.onclick=()=>openSheet(k);$("#tabs").appendChild(b)}({mem:tMem,apr:tApr,bk:tBk,cf:tCf,dg:tDg})[t]()}
+const B=()=>{const b=$("#body");b.innerHTML="";return b};
+const el=(h,p)=>{const d=document.createElement("div");d.className="it";d.innerHTML=h;(p||$("#body")).appendChild(d);return d};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function btn(p,t,f){const b=document.createElement("button");b.textContent=t;b.onclick=f;p.appendChild(b);return b}
+async function tMem(){const b=B();const q=document.createElement("input");q.placeholder="Pesquisar…";b.appendChild(q);const box=document.createElement("div");box.style.cssText="display:flex;flex-direction:column;gap:10px";b.appendChild(box);
+async function draw(){box.innerHTML="";const f=norm(q.value);
+const rows=[...(await DB.all("memory")).map(x=>({s:"memory",x,t:"Memória · "+x.tipo,h:x.chave,v:x.valor})),...(await DB.all("knowledge")).map(x=>({s:"knowledge",x,t:"Conhecimento · "+x.origem,h:x.titulo,v:x.conteudo})),...(await DB.all("docs")).map(x=>({s:"docs",x,t:"Documento · "+x.tipo+(x.aprendido?" · no conhecimento":""),h:x.nome,v:x.chars+" caracteres, "+x.chunks.length+" trechos · importado em "+x.data}))].filter(r=>!f||norm(r.h+r.v).includes(f));
+if(!rows.length)box.innerHTML='<div class="it">Nada armazenado ainda.</div>';
+rows.forEach(r=>{const d=el("<small>"+esc(r.t)+"</small><b>"+esc(r.h)+"</b><div>"+esc(r.v.slice(0,300))+"</div><div class='row'></div>",box);const row=d.querySelector(".row");
+if(r.s!=="docs")btn(row,"Editar",async()=>{const n=prompt("Novo valor:",r.v);if(n!==null){r.x[r.s==="memory"?"valor":"conteudo"]=n;await DB.put(r.s,r.x);draw()}});
+btn(row,"Excluir",async()=>{if(confirm("Excluir?")){await DB.del(r.s,r.x.id);draw()}})})}
+q.oninput=draw;draw()}
+function tApr(){const b=B();el("<b>Ensinar a assistente</b><small>Cole um texto ou envie um arquivo. Você revisa o resumo e confirma antes de salvar.</small>");
+const t=document.createElement("textarea");t.rows=8;t.placeholder="Cole o texto aqui…";b.appendChild(t);
+btn(b,"Analisar texto",()=>{if(t.value.trim().length<3)return;$("#sheet").style.display="none";learnText(t.value)}).className="pri";
+btn(b,"Enviar arquivo (TXT, PDF…)",()=>{$("#sheet").style.display="none";$("#file").click()})}
+function download(o,n){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(o,null,1)],{type:"application/json"}));a.download=n;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000)}
+function tBk(){const b=B();el("<b>Backup local</b><small>Gera um arquivo JSON no seu aparelho. Nada é enviado à internet.</small>");
+const row=el("<div class='row'></div>").firstChild;
+[["Memória","memory"],["Conhecimento","knowledge"],["Conversas","messages"],["Configurações","settings"],["Banco completo",null]].forEach(([n,k])=>btn(row,n,async()=>download(await DB.exportAll(k),"assistente-"+(k||"completo")+"-"+today()+".json")));
+const i=el("<b>Importar backup</b><small>Mescla com o que já existe (mesmo id é atualizado).</small>");const f=document.createElement("input");f.type="file";f.accept=".json";
+f.onchange=async()=>{try{const n=await DB.importAll(JSON.parse(await f.files[0].text()));await Cfg.load();applyCfg();sys(n+" registros importados.");alert(n+" registros importados.")}catch(e){alert("Backup inválido: "+e.message)}};i.appendChild(f)}
+function tCf(){const b=B(),c=Cfg.v;const d=el(`<label>Nome da assistente<input id="c1" value="${esc(c.nome)}"></label>
+<label>Formalidade<select id="c2"><option value="informal">Informal</option><option value="formal">Formal</option></select></label>
+<label>Tamanho das respostas<select id="c3"><option value="curtas">Curtas</option><option value="detalhadas">Detalhadas</option></select></label>
+<label>Voz<select id="c4"><option value="">Padrão do aparelho</option>${Voice.voices().map(v=>`<option>${esc(v.name)}</option>`).join("")}</select></label>
+<label>Instruções principais (guardadas para o futuro provedor de IA)<textarea id="c5" rows="3">${esc(c.instr)}</textarea></label>
+<label class="ck"><input type="checkbox" id="c6" ${c.auto?"checked":""}>Falar respostas automaticamente</label>
+<label class="ck"><input type="checkbox" id="c7" ${c.dev?"checked":""}>Modo desenvolvedor</label>`);
+d.style.cssText="display:flex;flex-direction:column;gap:12px";$("#c2").value=c.formal;$("#c3").value=c.tamanho;$("#c4").value=c.voz;
+d.onchange=d.oninput=async()=>{Object.assign(c,{nome:$("#c1").value||"Aurora",formal:$("#c2").value,tamanho:$("#c3").value,voz:$("#c4").value,instr:$("#c5").value,auto:$("#c6").checked,dev:$("#c7").checked});await Cfg.save();applyCfg()}}
+async function tDg(){const b=B();const ck=async n=>{try{await navigator.mediaDevices.enumerateDevices();return n}catch{return null}};
+const dev=navigator.mediaDevices?await navigator.mediaDevices.enumerateDevices():[];
+const rows=[["IndexedDB",!!window.indexedDB],["Speech Recognition",Voice.ok()],["Speech Synthesis",Voice.synOk()],["File System Access (pasta própria — ainda não usada)",!!window.showDirectoryPicker],["Service Worker",!!navigator.serviceWorker],["Câmera (dispositivo detectado)",dev.some(d=>d.kind==="videoinput")],["Microfone (dispositivo detectado)",dev.some(d=>d.kind==="audioinput")],["Armazenamento persistente",!!(navigator.storage&&navigator.storage.persist)],["Biblioteca PDF (pdf.js)",!!window.pdfjsLib],["Android",AndroidBridge.isAvailable()]];
+el(rows.map(r=>(r[1]?"✅ ":"❌ ")+esc(r[0])).join("<br>"));
+el("<b>Camadas</b><br>IA: "+AIProvider.nome+" (sem modelo)<br>Sync: "+SyncProvider.nome+"<br>Ferramentas: "+Object.keys(Tools.list).join(", "));
+if(Cfg.v.dev){el("<b>Logs</b><pre>"+esc(Log.items.slice(-40).join("\n")||"(vazio)")+"</pre>");const s=await DB.all("memory");el("<pre>memory: "+s.length+" · knowledge: "+(await DB.all("knowledge")).length+" · docs: "+(await DB.all("docs")).length+" · msgs: "+(await DB.all("messages")).length+"</pre>")}
+else el("<small>Ative o Modo desenvolvedor em Config para ver logs e contagens do banco.</small>")}
+function applyCfg(){$("#nm").textContent=Cfg.v.nome;document.title=Cfg.v.nome}
+/* ===== eventos ===== */
+function send(){const t=$("#in").value;$("#in").value="";$("#in").style.height="auto";handle(t)}
+$("#bSend").onclick=send;
+$("#in").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey&&innerWidth>700){e.preventDefault();send()}});
+$("#in").addEventListener("input",e=>{e.target.style.height="auto";e.target.style.height=Math.min(e.target.scrollHeight,120)+"px"});
+$("#bMic").onclick=()=>{if(Voice.active())return Voice.cancel();
+$("#dot").className="dot on";setSt("● Ouvindo… (toque no microfone para cancelar)");
+Voice.listen(t=>$("#in").value=t,f=>{$("#dot").className="dot";setSt("Pronta");if(f)send()})};
+$("#bAtt").onclick=()=>$("#file").click();
+$("#file").onchange=e=>{const f=e.target.files[0];e.target.value="";if(f){bubble("u","📎 "+f.name);importFile(f)}};
+$("#bMem").onclick=()=>openSheet("mem");$("#bClose").onclick=()=>$("#sheet").style.display="none";
+$("#sp1").onclick=()=>speechSynthesis.pause();$("#sp2").onclick=()=>speechSynthesis.resume();$("#sp3").onclick=()=>speechSynthesis.cancel();
+/* ===== início ===== */
+(async()=>{try{await DB.open();await Cfg.load();applyCfg();
+const h=(await DB.all("messages")).sort((a,b)=>a.t-b.t).slice(-40);h.forEach(m=>bubble(m.role,m.text,false));
+if(!h.length)say("Olá! Sou a "+Cfg.v.nome+". Tudo o que eu guardo fica só neste aparelho. Digite /ajuda para ver o que sei fazer.");
+if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{})}
+catch(e){Log.add("init",e);sys("Banco local indisponível: "+e.message+". Nada será salvo nesta sessão.")}})();
+</script></body></html>
