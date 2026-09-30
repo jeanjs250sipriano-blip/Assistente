@@ -1110,7 +1110,7 @@ const Mind = {
     for (const sg of text.split(/\n+|(?<=[.!?])\s+/).map(x => x.trim()).filter(Boolean)) {
       const pl = await ReasoningEngine.absorb(sg);
       if (pl && pl.items && pl.items.length) { items.push(...pl.items); continue; }
-      if (!pl || pl.acao === "RESPONDER") items.push(...Core.classify(sg));
+      if (!pl || pl.acao === "RESPONDER") items.push(...Core.classifyItems(sg));
     }
     return items;
   },
@@ -1268,7 +1268,7 @@ const Act = {
     if (r.aviso) return say(r.aviso);
 
     // No modo treino, afirmações longas → aprendizado
-    if (modo === "treino" && r.tipo === "afirmacao" && r.t.length >= 25)
+    if (r.tipo === "afirmacao" && ((modo === "treino" && r.t.length >= 25) || r.t.length >= 200))
       return learnText(r.t);
 
     // Resolver referências e buscar contexto
@@ -1377,7 +1377,10 @@ async function handle(text) {
     }
     const r = Core.interpret(text, Context);
     if (r.intencao === "memorizar" && r.items.length === 1 && r.items[0].categoria === "nota") {   // tenta estruturar antes de guardar como nota
-      const its = await Mind.extract(String(r.items[0].valor));
+      const txt = String(r.items[0].valor), nseg = txt.split(/\n+|(?<=[.!?])\s+/).filter(x => x.trim()).length;
+      const pessoal = (txt.match(/\b(eu|meu|minha|meus|minhas|moro|nasci|sou|tenho|trabalho|gosto)\b/gi) || []).length;
+      if (nseg >= 4 && pessoal < nseg / 3) return learnText(txt);   // texto informativo sobre um assunto → conhecimento, não memória pessoal
+      const its = await Mind.extract(txt);
       if (its.length) r.items = its;
     }
     if (r.intencao === "informar" && (/\n/.test(text) || /[.?!]\s+\S/.test(text) || /\s(e|mas)\s+[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ]/.test(text))) r.intencao = "conversar";
