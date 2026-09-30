@@ -806,10 +806,11 @@ const inverse = (R, gA, gB) =>
   (R === "pai" || R === "mãe") ? (gA === "f" ? "filha" : gA === "m" ? "filho" : "filho(a)") :
   (R === "irmão" || R === "irmã") ? (gB === "f" ? "irmã" : gB === "m" ? "irmão" : "irmão(ã)") :
   R === "marido" ? "esposa" : R === "esposa" ? "marido" : null;
-const CONFLITA = new Set(["residencia", "idade", "trabalho", "naturalidade", "nome"]);
-const LABU = { residencia: "residência", idade: "idade", trabalho: "trabalho", naturalidade: "naturalidade", ocupacao: "ocupação", nome: "nome" };
-const LABQ = { residencia: "onde você mora", naturalidade: "de onde você é", idade: "quantos anos você tem", trabalho: "onde você trabalha", ocupacao: "o que você faz" };
-const KEYRE = { residencia: /morar|moro|mora\b|residen|cidade/, naturalidade: /nasc|natural/, idade: /idade|\banos/, trabalho: /trabalh/, ocupacao: /ocupa|profiss/ };
+const CONFLITA = new Set(["residencia", "idade", "trabalho", "naturalidade", "nome", "nascimento"]);
+const LABU = { residencia: "residência", idade: "idade", trabalho: "trabalho", naturalidade: "naturalidade", ocupacao: "ocupação", nome: "nome", nascimento: "data de nascimento" };
+const LABQ = { residencia: "onde você mora", naturalidade: "de onde você é", idade: "quantos anos você tem", trabalho: "onde você trabalha", ocupacao: "o que você faz", nascimento: "quando você nasceu" };
+const KEYRE = { residencia: /morar|moro|mora\b|residen|cidade/, naturalidade: /nasc|natural/, idade: /idade|\banos/, trabalho: /trabalh/, ocupacao: /ocupa|profiss/, nascimento: /nasc/ };
+const idadeDe = v => { const m = String(v).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/), h = new Date(); if (m) { let a = h.getFullYear() - +m[3]; if (h.getMonth() + 1 < +m[2] || (h.getMonth() + 1 === +m[2] && h.getDate() < +m[1])) a--; return a; } return /^\d{4}$/.test(String(v)) ? h.getFullYear() - +v : null; };
 
 /* ---- EntityManager: entidades, atributos (com tempo) e relações; vivem no contexto ---- */
 const EntityManager = {
@@ -830,6 +831,7 @@ const EntityManager = {
   addFact(e, a, valor, o) {   // detectContradiction embutido
     const l = (e.attrs[a] = e.attrs[a] || []);
     const cur = l.filter(f => !f.temp && !f.neg).pop();
+    if (a === "nascimento" && cur && (String(cur.valor).includes(valor) || String(valor).includes(cur.valor))) return {};
     if (!o.temp && !o.neg && o.fonte !== "memoria" && cur && CONFLITA.has(a) && norm(cur.valor) !== norm(valor)) return { conflito: cur };
     if (!l.some(f => norm(f.valor) === norm(valor) && !!f.neg === !!o.neg && f.temp === (o.temp || null)))
       l.push({ valor, neg: !!o.neg, temp: o.temp || null, dia: today(), fonte: o.fonte || "conversa", conf: o.conf || 0.9 });
@@ -852,6 +854,10 @@ const EntityManager = {
         const v = String(m.valor).replace(/^(gosto de|prefiro|gosto que)\s*/i, "");
         if (!(this.user.attrs.gosto || []).some(f => norm(f.valor) === norm(v))) (this.user.attrs.gosto = this.user.attrs.gosto || []).push({ valor: v, temp: null, fonte: "memoria", conf: 1 });
       }
+      if (m.camada === "usuario" && m.categoria === "nota") {   // notas antigas viram fatos estruturados na sessão
+        for (const sg of String(m.valor).split(/\n+|(?<=[.!?])\s+/)) { const p = Interpreter.clause(sg.trim().replace(/[.!]+$/, ""), null); if (p && p.subj.user && !p.temp && !p.neg && !["estado", "desejo"].includes(p.attr)) this.addFact(this.user, p.attr, p.valor, { fonte: "memoria", conf: 0.8 }); }
+        continue;
+      }
       if (!m.ent) continue;
       const e = m.ent === "__usuario__" ? this.user : this.get(/^sua /.test(m.ent) ? null : m.ent, m.rel, true);
       if (m.attr === "relacao") { const x = String(m.valor).match(/^(\S+) de (.+)$/); if (x && !e.rels.some(r => r.alvo === x[2])) e.rels.push({ rel: x[1], alvo: x[2], inf: false }); }
@@ -870,6 +876,9 @@ const EntityManager = {
 
 /* ---- Interpreter: análise estrutural da frase (tempo, sujeito, predicado) ---- */
 const PRED = [
+  [/^(?:nasceu|nasci)\s+(?:em|no dia|dia)\s+(\d{1,2}\/\d{1,2}\/\d{4}|\d{4})$/i, "nascimento"],
+  [/^sou\s+d[eo]\s+(\d{4})$/i, "nascimento"],
+  [/^sou\s+d[eo]\s+(.+)$/i, "naturalidade"],
   [/^(?:mora|moram|moro|vive|vivem|vivo|reside)\s+(?:em|na|no)\s+(.+)$/i, "residencia"],
   [/^(?:est[áa]|est[ãa]o|estou|estava|estar[áa])\s+(?:em|na|no)\s+(.+)$/i, "localizacao"],
   [/^(?:est[áa]|est[ãa]o|estou)\s+(aqui|ali|l[áa])$/i, "localizacao"],
@@ -912,6 +921,7 @@ const Interpreter = {
   },
   clause(c, prev) {
     const t = this.temporal(c); let x = t.c, s, m, neg = false;
+    if (m = x.match(/^(?:meu nome (?:é|e)|me chamo)\s+(.+)$/i)) return { subj: { user: true }, attr: "nome", valor: m[1].trim(), neg: false, temp: t.temp };
     if (m = x.match(new RegExp("^(?:[Oo]\\s+|[Aa]\\s+)?([Mm]eu|[Mm]inha)\\s+(" + RELW + ")(?:\\s+(" + CN + "))?\\s*(.*)$"))) { s = { rel: normRel(m[2]), nome: m[3] || null }; x = m[4]; }
     else if (m = x.match(/^([Ee]le|[Ee]la)\s+(.*)$/)) { s = { pron: m[1].toLowerCase() }; x = m[2]; }
     else if (m = x.match(/^[Ee]u\s+(.*)$/)) { s = { user: true }; x = m[1]; }
@@ -932,7 +942,7 @@ function phr(sub, f, a) {
   const n = f.neg ? "não " : "", v = f.valor, hj = f.temp === "hoje" ? " hoje" : f.temp === "passado" ? " ontem" : f.temp === "futuro" ? " amanhã" : "";
   const T = {
     residencia: "mora em " + v, localizacao: "está " + (/^(aqui|ali|l[áa])$/i.test(v) ? "" : "em ") + v, idade: "tem " + v + " anos",
-    trabalho: "trabalha em " + v, naturalidade: "nasceu em " + v, gosto: "gosta de " + v, desejo: "quer " + v, nome: "se chama " + v, estado: "está " + v, ocupacao: "é " + v
+    trabalho: "trabalha em " + v, naturalidade: "nasceu em " + v, gosto: "gosta de " + v, desejo: "quer " + v, nome: "se chama " + v, estado: "está " + v, ocupacao: "é " + v, nascimento: "nasceu em " + v
   }[a] || (a + ": " + v);
   return sub + " " + n + T + hj;
 }
@@ -983,6 +993,7 @@ const ReasoningEngine = {
       Context.attrFoco = { attr: "nome", n: Sess.n };
       const u = await Identity.getUserName(), ss = EntityManager.val(EntityManager.user, "nome");
       if (u) return P("Seu nome é " + u + ".");
+      if (ss && ss.fonte === "memoria") return P("Seu nome é " + ss.valor + ".");
       if (ss) return P("Nesta conversa você disse que seu nome é " + ss.valor + ", mas ainda não guardei isso na memória.", { items: [{ camada: "usuario", categoria: "pessoal", chave: "nome", valor: ss.valor, ent: "__usuario__", attr: "nome", importancia: 9 }] });
       return P("Você ainda não me disse o seu nome.", { faltando: true });
     }
@@ -1002,16 +1013,17 @@ const ReasoningEngine = {
     }
     let ua = null;   // perguntas na 1ª pessoa sem "eu": "Onde moro?", "De onde sou?"
     if (/^(?:onde|em que (?:cidade|lugar)) (?:eu )?(?:moro|vivo)\b/.test(n)) ua = "residencia";
-    else if (/^de onde (?:eu )?(?:sou|vim)\b/.test(n)) ua = "naturalidade";
+    else if (/^(?:de onde (?:eu )?(?:sou|vim)|onde (?:eu )?nasci|em que cidade (?:eu )?nasci)\b/.test(n)) ua = "naturalidade";
     else if (/^(?:quantos anos (?:eu )?tenho|qual (?:e )?(?:a )?minha idade)\b/.test(n)) ua = "idade";
     else if (/^onde (?:eu )?trabalho\b/.test(n)) ua = "trabalho";
+    else if (/^(?:quando (?:eu )?nasci|qual (?:e )?a minha data de nascimento)/.test(n)) ua = "nascimento";
     else if (/^(?:o que eu faco|qual (?:e )?(?:a )?minha (?:profissao|ocupacao))\b/.test(n)) ua = "ocupacao";
     if (ua) {
       if (!EntityManager.hyd) await EntityManager.hydrate();
       const f = EntityManager.val(EntityManager.user, ua);
       if (f) return P(cap(phr("você", f, ua)) + ".");
-      const h = (await DB.all("memory")).find(x => x.camada === "usuario" && KEYRE[ua].test(norm(x.chave + " " + x.valor)));
-      return h ? P("Você me disse: " + h.valor + ".") : P("Você ainda não me disse " + LABQ[ua] + ".", { faltando: true });
+      if (ua === "idade") { const nf = EntityManager.val(EntityManager.user, "nascimento"); if (nf) { const a = idadeDe(nf.valor); return P(/\//.test(nf.valor) ? "Você tem " + a + " anos (nasceu em " + nf.valor + ")." : "Você nasceu em " + nf.valor + ", então tem " + (a - 1) + " ou " + a + " anos. Me diga sua data de nascimento e eu calculo o valor exato."); } }
+      return P("Você ainda não me disse " + LABQ[ua] + ".", { faltando: true });
     }
     if (/^(?:do que|o que) eu gosto/.test(n)) { const g = (EntityManager.user.attrs.gosto || []).map(x => x.valor); return g.length ? P("Você gosta de " + g.join(", ") + ".") : P("Você ainda não me disse do que gosta.", { faltando: true }); }
     const wh = /^(onde|quantos anos|qual (?:e )?a idade)/.test(n), yn = !/^(qual|quais|quem|onde|quanto|quantos|como|quando)\b/.test(n);
@@ -1076,7 +1088,7 @@ const ReasoningEngine = {
     }
     if (!ack.length) return null;
     if (foco.length) { EntityManager.foco = [...new Set(foco)]; const last = EntityManager.list.find(x => x.id === foco[foco.length - 1]); if (last) Context.ultimaPessoa = last.nome; }
-    return P("Entendi: " + ack.map((a, i) => i === 0 && /^(Sua|Seu|Você)\b/.test(a) ? a[0].toLowerCase() + a.slice(1) : a).join(". ") + ".", { items: quiet ? [] : items, quiet, kind });
+    return P("Entendi: " + ack.join(". ") + ".", { ack, items: quiet ? [] : items, quiet, kind });
   }
 };
 
@@ -1085,12 +1097,23 @@ const DecisionEngine = {
   run(plans) {
     const ask = plans.find(p => p.acao === "PEDIR_ESCLARECIMENTO" || p.acao === "CORRIGIR");
     if (ask) { if (ask.pend) pending = ask.pend; return say(ask.texto); }
-    const txt = plans.filter(p => p.texto).map(p => p.texto).join(" "), items = plans.flatMap(p => p.items || []);
+    const acks = plans.flatMap(p => p.ack || []), items = plans.flatMap(p => p.items || []);
+    let txt = plans.filter(p => !p.ack && p.texto).map(p => p.texto).join(" ");
+    if (acks.length) { const a = acks.length > 1 ? "Entendi:\n• " + acks.map(cap).join("\n• ") : "Entendi: " + (/^(Sua|Seu|Você)\b/.test(acks[0]) ? acks[0][0].toLowerCase() + acks[0].slice(1) : acks[0]) + "."; txt = txt ? txt + "\n" + a : a; }
     if (items.length) { Context.candidatos = items; Context.candN = Sess.n; pending = { k: "mem", items, o: "conversa" }; return say(txt + "\nQuer que eu memorize isso?"); }
     say(txt);
   }
 };
 const Mind = {
+  async extract(text) {   // extrai itens estruturados de um texto com várias linhas/frases
+    const items = [];
+    for (const sg of text.split(/\n+|(?<=[.!?])\s+/).map(x => x.trim()).filter(Boolean)) {
+      const pl = await ReasoningEngine.absorb(sg);
+      if (pl && pl.items && pl.items.length) { items.push(...pl.items); continue; }
+      if (!pl || pl.acao === "RESPONDER") items.push(...Core.classify(sg));
+    }
+    return items;
+  },
   async run(text, r) {
     text = text.replace(/^Entendi:\s*/i, "");
     const el = text.match(/^(?:o|a)\s+(?:meu|minha)\s+(?:nome\s+)?(?:é|e)\s+(.+?)[.!]?$/i);   // resposta elíptica: "O meu é Jean"
@@ -1098,7 +1121,14 @@ const Mind = {
       const v = el[1].trim(); EntityManager.addFact(EntityManager.user, "nome", v, {});
       DecisionEngine.run([P("Entendi: seu nome é " + v + ".", { items: [{ camada: "usuario", categoria: "pessoal", chave: "nome", valor: v, ent: "__usuario__", attr: "nome", importancia: 9 }] })]); return true;
     }
-    const sents = text.split(/(?<=[.?!])\s+/).map(s => s.trim()).filter(Boolean), plans = [];
+    const rc = text.match(/^(?:mas\s+)?(?:eu\s+)?(?:j[áa]\s+)?(?:te\s+)?(?:disse|falei)\s+(?:isso\s+)?(?:que\s+)?(.+)$/i);   // "Mas disse que sou de 1992"
+    if (rc) {
+      if (!EntityManager.hyd) await EntityManager.hydrate();
+      const p = Interpreter.clause(rc[1].replace(/[.!]+$/, ""), null), f = p && p.subj.user ? EntityManager.val(EntityManager.user, p.attr) : null;
+      if (f) { DecisionEngine.run([P("Verdade, você me disse que " + phr("", f, p.attr).trim() + "." + (p.attr === "nascimento" && /\//.test(f.valor) ? " Isso dá " + idadeDe(f.valor) + " anos." : ""))]); return true; }
+      text = rc[1];
+    }
+    const sents = text.split(/\n+|(?<=[.?!])\s+/).map(s => s.trim()).filter(Boolean), plans = [];
     if (r && r.intencao === "informar") { for (const s of sents) await ReasoningEngine.absorb(s, true); return false; }   // registra no contexto; Act.informar pede confirmação
     for (const s of sents) {
       if (Interpreter.kind(s) === "pergunta") for (const q of ReasoningEngine.splitQ(s)) plans.push(await ReasoningEngine.ask(q) || { acao: "NADA", q });
@@ -1133,6 +1163,7 @@ const HELP = "Modos: 💬 Conversar e 🧠 Treinar (aqui você ensina por texto,
 const desc = i => {
   if (i.camada === "identidade") return "você quer que meu " + i.chave + " seja “" + i.valor + "”";
   if (i.categoria === "preferencia") return "uma preferência sua: " + i.valor;
+  if (i.ent === "__usuario__") return i.chave + ": " + i.valor;
   if (i.categoria === "nota") return "guardar como nota: “" + String(i.valor).slice(0, 140) + "”";
   if (i.chave === "nome") return "seu nome é " + i.valor;
   return "“" + i.chave + "” é “" + i.valor + "” (" + i.categoria + ")";
@@ -1168,7 +1199,7 @@ const Act = {
   async memorizar(r, pre) {
     Context.candidatos = r.items; Context.candN = Sess.n;
     ask({ k: "mem", items: r.items, o: modo === "treino" ? "treinamento" : "conversa" },
-      (pre || "Entendi: ") + r.items.map(desc).join("; ") + ". Deseja que eu memorize isso?");
+      (pre || "Entendi: ") + (r.items.length > 1 ? "\n• " + r.items.map(desc).join("\n• ") + "\n" : r.items.map(desc).join("; ") + ". ") + "Deseja que eu memorize isso?");
   },
   async informar(r) { return Act.memorizar(r, "Percebi uma informação: "); },
 
@@ -1339,17 +1370,17 @@ async function handle(text) {
     if (/^\W*(guarde|memorize|grave|anote)(\s+(isso|isto|essa informa[cç][aã]o|esta informa[cç][aã]o))?\W*$/i.test(text)) {   // "memorize isso" → reinterpreta a fala anterior
       const prev = (Context.prevUser() || "").replace(/^Entendi:\s*/i, "").trim();
       if (!prev) return say("O que devo memorizar? Diga, por exemplo: “guarde que meu projeto se chama JORNADA”.");
-      const pl = await ReasoningEngine.absorb(prev);
-      if (pl && pl.items && pl.items.length) return DecisionEngine.run([pl]);
+      const its = await Mind.extract(prev);
+      if (its.length) { Context.candidatos = its; Context.candN = Sess.n; return ask({ k: "mem", items: its, o: "conversa" }, "Entendi:\n• " + its.map(desc).join("\n• ") + "\nDeseja que eu memorize isso?"); }
       const it = Worth.assess(prev).item || { camada: "usuario", categoria: "nota", chave: (kw(prev, 2).join(" ") || "nota") + " (nota)", valor: prev, importancia: 6 };
       return ask({ k: "mem", items: [it], o: "conversa" }, "Não identifiquei um fato estruturado. Posso guardar como nota: “" + prev.slice(0, 140) + "”. Deseja que eu memorize?");
     }
     const r = Core.interpret(text, Context);
     if (r.intencao === "memorizar" && r.items.length === 1 && r.items[0].categoria === "nota") {   // tenta estruturar antes de guardar como nota
-      const pl = await ReasoningEngine.absorb(String(r.items[0].valor));
-      if (pl && pl.items && pl.items.length) r.items = pl.items;
+      const its = await Mind.extract(String(r.items[0].valor));
+      if (its.length) r.items = its;
     }
-    if (r.intencao === "informar" && (/[.?!]\s+\S/.test(text) || /\s(e|mas)\s+[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ]/.test(text))) r.intencao = "conversar";
+    if (r.intencao === "informar" && (/\n/.test(text) || /[.?!]\s+\S/.test(text) || /\s(e|mas)\s+[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ]/.test(text))) r.intencao = "conversar";
     if (!SYS.has(r.intencao) && await Mind.run(text, r)) { Context.ultimaIntencao = r.intencao; return; }
     Context.ultimaIntencao = r.intencao;
     Log.add("interpretado: " + r.tipo + " / " + r.intencao + " / conf=" + (r.confianca || 0).toFixed(2));
