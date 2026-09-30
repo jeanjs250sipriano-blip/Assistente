@@ -171,6 +171,7 @@ const Capabilities = {
     "aprender textos e documentos (com revisão)",
     "buscar memória, conhecimento e documentos locais",
     "reconhecimento e síntese de voz (quando o navegador permitir)",
+    "raciocinar sobre pessoas, relações, tempo e comparações simples (regras locais)",
     "backup e restauração local (JSON)",
     "modo treinamento separado"
   ],
@@ -782,6 +783,296 @@ const Core = {
   }
 };
 
+/* ========================================================================
+   CAMADA COGNITIVA: Interpreter → EntityManager → ReasoningEngine → DecisionEngine
+   Heurísticas locais em português. NÃO é rede neural nem LLM; o AIProvider segue abstrato.
+   ======================================================================== */
+/*MIND*/
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+const RELS = { irmao: ["irmão", "m"], irma: ["irmã", "f"], pai: ["pai", "m"], mae: ["mãe", "f"], filho: ["filho", "m"], filha: ["filha", "f"], amigo: ["amigo", "m"], amiga: ["amiga", "f"], esposa: ["esposa", "f"], marido: ["marido", "m"], primo: ["primo", "m"], prima: ["prima", "f"], tio: ["tio", "m"], tia: ["tia", "f"], avo: ["avô/avó", "?"], namorado: ["namorado", "m"], namorada: ["namorada", "f"], chefe: ["chefe", "?"], colega: ["colega", "?"] };
+const RELW = "irm[ãa]o|irm[ãa]|pai|m[ãa]e|filh[oa]|amig[oa]|esposa|marido|prim[oa]|tio|tia|av[ôóo]|namorad[oa]|chefe|colega";
+const CN = "[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][a-záàâãéêíóôõúç]+";
+const NOTNAME = new Set("hoje ontem amanha agora eu ele ela isso talvez acho estou quero minha meu depois antes qual onde quem como quanto quando quantos voce isso".split(" "));
+const normRel = r => (RELS[norm(r)] || [r])[0];
+const gen = (nome, rel) => {
+  if (rel) { const r = Object.values(RELS).find(x => x[0] === rel); if (r && r[1] !== "?") return r[1]; }
+  const n = norm(nome || ""); if (n.length < 3) return "?";
+  return /a$/.test(n) ? "f" : /o$/.test(n) ? "m" : "?";
+};
+const inverse = (R, gA, gB) =>
+  (R === "filho" || R === "filha") ? (gB === "f" ? "mãe" : gB === "m" ? "pai" : "pai/mãe") :
+  (R === "pai" || R === "mãe") ? (gA === "f" ? "filha" : gA === "m" ? "filho" : "filho(a)") :
+  (R === "irmão" || R === "irmã") ? (gB === "f" ? "irmã" : gB === "m" ? "irmão" : "irmão(ã)") :
+  R === "marido" ? "esposa" : R === "esposa" ? "marido" : null;
+const CONFLITA = new Set(["residencia", "idade", "trabalho", "naturalidade", "nome"]);
+
+/* ---- EntityManager: entidades, atributos (com tempo) e relações; vivem no contexto ---- */
+const EntityManager = {
+  list: [], foco: [], tick: 0, hyd: false,
+  user: { id: "user", nome: "você", tipo: "usuario", genero: "?", rel: null, attrs: {}, rels: [], ultimoUso: 0 },
+  find(n) { const k = norm(n); return this.list.find(e => norm(e.nome) === k); },
+  get(nome, rel, noBump) {
+    let e = nome ? this.find(nome) : null;
+    if (!e && rel) e = this.list.find(y => y.rel === rel && (!nome || y.anonimo));
+    if (!e) { e = { id: uid(), nome: nome || "sua " + rel, anonimo: !nome, tipo: "pessoa", rel: rel || null, genero: "?", attrs: {}, rels: [], ultimoUso: 0 }; this.list.push(e); }
+    else if (nome && e.anonimo) { e.nome = nome; e.anonimo = false; }
+    if (rel && !e.rel) e.rel = rel;
+    const g = gen(e.anonimo ? "" : e.nome, e.rel); if (g !== "?") e.genero = g;
+    if (!noBump) e.ultimoUso = ++this.tick;
+    return e;
+  },
+  lookup(nome, rel) { return nome ? this.find(nome) : (rel ? this.list.find(y => y.rel === rel) : null); },
+  addFact(e, a, valor, o) {   // detectContradiction embutido
+    const l = (e.attrs[a] = e.attrs[a] || []);
+    const cur = l.filter(f => !f.temp && !f.neg).pop();
+    if (!o.temp && !o.neg && o.fonte !== "memoria" && cur && CONFLITA.has(a) && norm(cur.valor) !== norm(valor)) return { conflito: cur };
+    if (!l.some(f => norm(f.valor) === norm(valor) && !!f.neg === !!o.neg && f.temp === (o.temp || null)))
+      l.push({ valor, neg: !!o.neg, temp: o.temp || null, dia: today(), fonte: o.fonte || "conversa", conf: o.conf || 0.9 });
+    return {};
+  },
+  val(e, a, hoje) {
+    const fs = (e.attrs[a] || []).filter(f => !(f.temp === "hoje" && f.dia !== today()));
+    return [...fs].reverse().find(f => hoje ? f.temp : !f.temp) || fs[fs.length - 1] || null;
+  },
+  addRel(a, R, b) {
+    a.rels.push({ rel: R, alvo: b.nome, inf: false });
+    const iv = inverse(R, a.genero, b.genero);
+    if (iv) b.rels.push({ rel: iv, alvo: a.nome, inf: true });   // inferência segura: só inversas diretas
+    return iv;
+  },
+  async hydrate() {   // reconstrói entidades a partir da memória persistente confirmada
+    this.hyd = true;
+    for (const m of await DB.all("memory")) {
+      if (m.categoria === "preferencia" && m.camada === "usuario") {
+        const v = String(m.valor).replace(/^(gosto de|prefiro|gosto que)\s*/i, "");
+        if (!(this.user.attrs.gosto || []).some(f => norm(f.valor) === norm(v))) (this.user.attrs.gosto = this.user.attrs.gosto || []).push({ valor: v, temp: null, fonte: "memoria", conf: 1 });
+      }
+      if (!m.ent) continue;
+      const e = this.get(/^sua /.test(m.ent) ? null : m.ent, m.rel, true);
+      if (m.attr === "relacao") { const x = String(m.valor).match(/^(\S+) de (.+)$/); if (x && !e.rels.some(r => r.alvo === x[2])) e.rels.push({ rel: x[1], alvo: x[2], inf: false }); }
+      else this.addFact(e, m.attr, m.valor, { fonte: "memoria", conf: 1 });
+    }
+  },
+  resolvePron(p) {   // ele/ela: gênero + foco da última fala + recência; nunca "última pessoa" às cegas
+    const g = /^ela/.test(p) ? "f" : "m", ok = e => e.tipo === "pessoa" && (e.genero === "?" || e.genero === g);
+    const c = this.foco.map(id => this.list.find(e => e.id === id)).filter(e => e && ok(e));
+    if (c.length === 1) return { e: c[0], conf: 0.9 };
+    if (c.length > 1) return { amb: c, conf: 0.3 };
+    const r = this.list.filter(ok).sort((a, b) => b.ultimoUso - a.ultimoUso)[0];
+    return r ? { e: r, conf: 0.6 } : { conf: 0 };
+  }
+};
+
+/* ---- Interpreter: análise estrutural da frase (tempo, sujeito, predicado) ---- */
+const PRED = [
+  [/^(?:mora|moram|moro|vive|vivem|vivo|reside)\s+(?:em|na|no)\s+(.+)$/i, "residencia"],
+  [/^(?:est[áa]|est[ãa]o|estou|estava|estar[áa])\s+(?:em|na|no)\s+(.+)$/i, "localizacao"],
+  [/^(?:est[áa]|est[ãa]o|estou)\s+(aqui|ali|l[áa])$/i, "localizacao"],
+  [/^(?:tem|tenho)\s+(\d+)(?:\s+anos)?$/i, "idade"],
+  [/^(?:trabalha|trabalho)\s+(?:em|na|no|numa|num|como|de)\s+(.+)$/i, "trabalho"],
+  [/^(?:se chama|chama-se)\s+(.+)$/i, "nome"],
+  [/^(?:nasceu|nasci)\s+(?:em|na|no)\s+(.+)$/i, "naturalidade"],
+  [/^(?:gosta|gosto)\s+de\s+(.+)$/i, "gosto"],
+  [/^(?:quer|quero|querem)\s+(.+)$/i, "desejo"],
+  [/^(?:é|foi|sou)\s+(filh[oa]|pai|m[ãa]e|irm[ãa]o|irm[ãa]|marido|esposa|amig[oa]|prim[oa]|tio|tia)\s+d[eoa]s?\s+(.+)$/i, "relacao"],
+  [/^(?:est[áa]|estou|estava)\s+(.+)$/i, "estado"]
+];
+const Interpreter = {
+  kind(s) {   // fato / opinião / possibilidade / relato / pergunta
+    const n = norm(s);
+    if (/\?\s*$/.test(s) || /^(qual|quais|quem|onde|quanto|quantos|como|quando)\b/.test(n)) return "pergunta";
+    if (/\b(acho|acredito|na minha opiniao)\b/.test(n)) return "opiniao";
+    if (/\b(talvez|quem sabe|pode ser que)\b/.test(n)) return "possibilidade";
+    if (/\bontem\b/.test(n)) return "relato";
+    return "fato";
+  },
+  temporal(c) {
+    const m = c.match(/\b(hoje|agora|neste momento|no momento|ontem|amanh[ãa]|atualmente)\b/i);
+    if (!m) return { c, temp: null };
+    const w = norm(m[1]);
+    return { c: c.replace(m[0], "").replace(/\s{2,}/g, " ").replace(/^[\s,]+|[\s,]+$/g, ""), temp: w === "ontem" ? "passado" : /amanha/.test(w) ? "futuro" : w === "atualmente" ? null : "hoje" };
+  },
+  clauses(s) {
+    return s.replace(/[.!?]+$/, "").split(/\s*,?\s+(?:mas|porém|e)\s+(?=hoje|ontem|amanh|agora|est[áa]|tem\b|mora|trabalha|gosta|n[ãa]o|[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ])/);
+  },
+  subj(q) {   // sujeito em perguntas
+    let m;
+    if (m = q.match(new RegExp("\\b([Mm]eu|[Mm]inha)\\s+(" + RELW + ")(?:\\s+(" + CN + "))?"))) return { rel: normRel(m[2]), nome: m[3] || null };
+    if (m = q.match(/\b(ele|ela|dele|dela)\b/i)) return { pron: m[1].toLowerCase().replace("dele", "ele").replace("dela", "ela") };
+    const w = q.split(/\s+/).slice(1).join(" ");
+    if ((m = w.match(new RegExp("\\b(" + CN + ")"))) && !NOTNAME.has(norm(m[1]))) return { nome: m[1] };
+    return null;
+  },
+  clause(c, prev) {
+    const t = this.temporal(c); let x = t.c, s, m, neg = false;
+    if (m = x.match(new RegExp("^(?:[Oo]\\s+|[Aa]\\s+)?([Mm]eu|[Mm]inha)\\s+(" + RELW + ")(?:\\s+(" + CN + "))?\\s*(.*)$"))) { s = { rel: normRel(m[2]), nome: m[3] || null }; x = m[4]; }
+    else if (m = x.match(/^([Ee]le|[Ee]la)\s+(.*)$/)) { s = { pron: m[1].toLowerCase() }; x = m[2]; }
+    else if (m = x.match(/^[Ee]u\s+(.*)$/)) { s = { user: true }; x = m[1]; }
+    else if ((m = x.match(new RegExp("^(" + CN + "(?:\\s" + CN + ")?)\\s+(.*)$"))) && !NOTNAME.has(norm(m[1]))) { s = { nome: m[1] }; x = m[2]; }
+    else if (/^(estou|tenho|moro|gosto|quero|trabalho|nasci|vivo)\b/i.test(x)) s = { user: true };
+    else s = prev;
+    x = x.trim(); if (/^n[ãa]o\s/i.test(x)) { neg = true; x = x.replace(/^n[ãa]o\s+/i, ""); }
+    if (!s) return null;
+    for (const [re, a] of PRED) if (m = x.match(re)) return a === "relacao" ? { subj: s, attr: a, relw: normRel(m[1]), valor: m[2].trim(), neg, temp: t.temp } : { subj: s, attr: a, valor: m[1].trim(), neg, temp: t.temp };
+    return null;
+  }
+};
+
+/* ---- apresentação neutra dos fatos (a persona decide o tom; aqui só a informação) ---- */
+const who = e => e.tipo === "usuario" ? "você" : e.rel ? ((e.genero === "f" ? "sua " : "seu ") + e.rel + (e.anonimo ? "" : " " + e.nome)) : e.nome;
+const LAB = { residencia: x => "onde " + x + " mora", localizacao: x => "onde " + x + " está", idade: x => "a idade de " + x, trabalho: x => "onde " + x + " trabalha", naturalidade: x => "onde " + x + " nasceu", gosto: x => "do que " + x + " gosta" };
+function phr(sub, f, a) {
+  const n = f.neg ? "não " : "", v = f.valor, hj = f.temp === "hoje" ? " hoje" : f.temp === "passado" ? " ontem" : f.temp === "futuro" ? " amanhã" : "";
+  const T = {
+    residencia: "mora em " + v, localizacao: "está " + (/^(aqui|ali|l[áa])$/i.test(v) ? "" : "em ") + v, idade: "tem " + v + " anos",
+    trabalho: "trabalha em " + v, naturalidade: "nasceu em " + v, gosto: "gosta de " + v, desejo: "quer " + v, nome: "se chama " + v, estado: "está " + v
+  }[a] || (a + ": " + v);
+  return sub + " " + n + T + hj;
+}
+const P = (texto, x) => ({ acao: "RESPONDER", texto, conf: 0.9, ...x });
+function calc(s) {   // calculadora segura (sem eval)
+  let i = 0; const ws = () => { while (s[i] === " ") i++; };
+  const num = () => { ws(); if (s[i] === "(") { i++; const v = add(); ws(); i++; return v; } let sg = 1; if (s[i] === "-") { sg = -1; i++; ws(); } const m = s.slice(i).match(/^\d+(?:\.\d+)?/); if (!m) throw 0; i += m[0].length; return sg * parseFloat(m[0]); };
+  const mul = () => { let v = num(); for (;;) { ws(); const o = s[i]; if (o === "*" || o === "/") { i++; const r = num(); v = o === "*" ? v * r : v / r; } else return v; } };
+  const add = () => { let v = mul(); for (;;) { ws(); const o = s[i]; if (o === "+" || o === "-") { i++; const r = mul(); v = o === "+" ? v + r : v - r; } else return v; } };
+  const v = add(); ws(); if (i < s.length || !isFinite(v)) throw 0; return v;
+}
+Tools.register("calculadora", "Calcula expressões aritméticas", calc);
+
+/* ---- ReasoningEngine: entende, relaciona, compara, infere; devolve PLANOS (não escreve no banco) ---- */
+const ReasoningEngine = {
+  splitQ(s) {   // decomposição de perguntas compostas e elípticas
+    s = s.replace(/\?\s*$/, "");
+    let parts = s.split(/\s*,?\s+e\s+(?=(?:qual|quais|onde|quem|quanto|quantos|como|quando)\b)/i);
+    if (parts.length === 1) { const m = s.match(/^(.*?)\s+e\s+(?:o|a)\s+(seu|sua|dele|dela)$/i); if (m) parts = [m[1], m[1].replace(/\b(meu|minha)\b/i, m[2])]; }
+    parts = parts.map((p, i) => { const m = p.match(/^(?:qual|como)\s+(?:é|e)\s+(?:o\s+|a\s+)?(seu|sua|dele|dela)$/i); return i && m ? parts[i - 1].replace(/\b(meu|minha)\b/i, m[1]) : p; });
+    return parts.map(p => p + "?");
+  },
+  expr(n) {
+    const e = n.replace(/(\d),(\d)/g, "$1.$2").replace(/\s+(?:vezes|x|multiplicado por)\s+/g, " * ").replace(/\s+mais\s+/g, " + ").replace(/\s+menos\s+/g, " - ").replace(/\s+dividido por\s+/g, " / ");
+    return /^[\d\s.+\-*/()]+$/.test(e) && /\d/.test(e) ? e.trim() : null;
+  },
+  async entOf(sj) {   // resolveReference / resolveEntity
+    if (!sj) return { none: true };
+    if (sj.pron) { const r = EntityManager.resolvePron(sj.pron); return r.e ? { e: r.e, conf: r.conf, pron: sj.pron } : r.amb ? { amb: r.amb } : { none: true }; }
+    let e = EntityManager.lookup(sj.nome, sj.rel);
+    if (!e && !EntityManager.hyd) { await EntityManager.hydrate(); e = EntityManager.lookup(sj.nome, sj.rel); }
+    return e ? { e, conf: 0.95 } : { none: true, sj };
+  },
+  missing(r, sj) { return P("Você ainda não me falou sobre " + (sj && sj.rel ? "sua " + sj.rel : sj && sj.nome ? sj.nome : "isso") + ".", { faltando: true }); },
+  clarify(amb, s) { const op = amb.map(e => e.nome); return { acao: "PEDIR_ESCLARECIMENTO", texto: "Você está falando " + op.map((o, i) => (i ? "ou d" : "d") + (/a$/i.test(o) ? "a " : "o ") + o).join(" ") + "?", pend: { k: "esclarece", s, op } }; },
+  compare(n) {
+    const c = EntityManager.list.filter(e => e.tipo === "pessoa" && EntityManager.val(e, "idade")).sort((a, b) => b.ultimoUso - a.ultimoUso).slice(0, 6);
+    if (c.length < 2) return P("Preciso da idade de pelo menos duas pessoas para comparar, e você ainda não me deu isso.", { faltando: true });
+    const age = e => +EntityManager.val(e, "idade").valor, mais = /velh/.test(n), s = [...c].sort((a, b) => mais ? age(b) - age(a) : age(a) - age(b));
+    if (age(s[0]) === age(s[1])) return P(cap(who(s[0])) + " e " + who(s[1]) + " têm a mesma idade (" + age(s[0]) + " anos).");
+    const nm = e => e.anonimo ? who(e) : e.nome;
+    return P(cap(nm(s[0])) + " é mais " + (mais ? "velh" : "nov") + (s[0].genero === "f" ? "a" : "o") + " (" + age(s[0]) + " anos, contra " + age(s[1]) + " de " + nm(s[1]) + ").");
+  },
+  async ask(q) {   // planResponse para UMA sub-pergunta; null = não sei tratar
+    const n = norm(q).replace(/[?!.]/g, "").trim(); let m;
+    if (/\bmeu nome\b/.test(n)) { const u = await Identity.getUserName(); return P(u ? "Seu nome é " + u + "." : "Você ainda não me disse o seu nome.", { faltando: !u }); }
+    if (/\b(seu|sua) nome\b|voce se chama|quem e voce/.test(n)) return P("Meu nome é " + await Identity.getAssistantName() + ".");
+    if (/voce sabe quem eu sou|quem sou eu/.test(n)) { const u = await Identity.getUserName(); return P(u ? "Você é " + u + "." : "Ainda não sei quem você é. Se quiser, me diga seu nome.", { faltando: !u }); }
+    if (m = n.match(/^(?:quanto (?:e|da)|calcule)\s+(.+)$/)) { const ex = this.expr(m[1]); if (ex) { try { const r = Tools.run("calculadora", ex); return P(ex.replace(/\*/g, "×").replace(/\//g, "÷") + " = " + (+r.toFixed(10)) + ".", { ferramenta: "calculadora" }); } catch { return P("Não consegui calcular essa expressão.", { conf: 0.3 }); } } }
+    if (/mais (velh|nov)/.test(n)) return this.compare(n);
+    if (m = n.match(/^qual (?:e )?o nome (d[ao]s?) (.+)$/)) {
+      const obj = m[2].trim(), hit = [...EntityManager.list, EntityManager.user].flatMap(e => Object.values(e.attrs).flat()).find(f => norm(f.valor).includes(obj));
+      if (!hit) return P("Não tenho informação sobre " + m[1] + " " + obj + ".", { faltando: true });
+      if (new RegExp("^(uma?|o|a)\\s+" + obj + "$").test(norm(hit.valor))) return P("Você ainda não me disse o nome " + m[1] + " " + obj + ".", { faltando: true });
+      return P("O nome " + m[1] + " " + obj + " é " + hit.valor + ".");
+    }
+    if (m = n.match(/rela[cç][aã]o entre (.+?) e (.+)$/)) {
+      const a = EntityManager.find(m[1]), b = EntityManager.find(m[2]), r = a && a.rels.filter(x => norm(x.alvo) === norm(m[2]));
+      return r && r.length ? P(r.map(x => cap(a.nome) + " é " + x.rel + " de " + x.alvo + (x.inf ? " (deduzido, não dito por você)" : "")).join("; ") + ".") : P("Você ainda não me disse qual é a relação entre " + m[1] + " e " + m[2] + ".", { faltando: true });
+    }
+    const wh = /^(onde|quantos anos|qual (?:e )?a idade)/.test(n), yn = !/^(qual|quais|quem|onde|quanto|quantos|como|quando)\b/.test(n);
+    if (!wh && !yn && !/^quem e/.test(n)) return null;
+    const sj = Interpreter.subj(q), R = await this.entOf(sj);
+    if (R.amb) return this.clarify(R.amb, q);
+    if (wh) {
+      const a = /anos|idade/.test(n) ? "idade" : /\bmora|vive|reside/.test(n) ? "residencia" : /\besta|estao|fica/.test(n) ? "localizacao" : /trabalha/.test(n) ? "trabalho" : /nasceu/.test(n) ? "naturalidade" : null;
+      if (!a) return null;
+      if (!R.e) return this.missing(R, sj);
+      const f = EntityManager.val(R.e, a, /\b(hoje|agora)\b/.test(n));
+      EntityManager.foco = [R.e.id];
+      return f ? P(cap(phr(R.pron || who(R.e), f, a)) + ".") : P("Você ainda não me disse " + LAB[a](who(R.e)) + ".", { faltando: true });
+    }
+    if (/^quem e/.test(n)) {
+      if (!R.e) return this.missing(R, sj);
+      const e = R.e, fs = Object.entries(e.attrs).map(([a, l]) => { const f = EntityManager.val(e, a); return f ? phr(who(e), f, a) : null; }).filter(Boolean), rs = e.rels.map(r => cap(e.nome) + " é " + r.rel + " de " + r.alvo + (r.inf ? " (deduzido)" : ""));
+      return fs.length + rs.length ? P(cap([...fs, ...rs].join(". ")) + ".") : P("Só sei que " + e.nome + " foi mencionad" + (e.genero === "f" ? "a" : "o") + ", sem detalhes.", { faltando: true });
+    }
+    const p = Interpreter.clause(q.replace(/\?\s*$/, ""), null);   // pergunta sim/não: verifica contra os fatos
+    if (!p) return null;
+    const S = p.subj.user ? { e: EntityManager.user } : await this.entOf(p.subj);
+    if (S.amb) return this.clarify(S.amb, q);
+    if (!S.e) return this.missing(S, p.subj);
+    const fs = EntityManager.val(S.e, p.attr) ? (S.e.attrs[p.attr] || []).filter(f => !f.temp) : [], hit = fs.find(f => norm(f.valor).includes(norm(p.valor)) || norm(p.valor).includes(norm(f.valor)));
+    const tmp = (S.e.attrs.desejo || []).find(f => f.temp === "hoje" && f.dia === today() && norm(f.valor).includes(norm(p.valor)));
+    if (hit) return P("Sim, " + phr(who(S.e), hit, p.attr) + "." + (tmp ? " Hoje você disse " + (tmp.neg ? "que não quer" : "que quer") + " " + tmp.valor + ", mas isso é diferente de gostar." : ""));
+    return P(fs.length ? "Não tenho isso registrado; o que você me disse foi: " + fs.map(f => f.valor).join(", ") + "." : "Você ainda não me disse isso.", { faltando: !fs.length });
+  },
+  async absorb(s, quiet) {   // analisa uma afirmação: fatos, relações, tempo, contradições → plano
+    if (!quiet) { let m;
+      if (m = s.match(/\bestou\s+(?:pensando|planejando)\s+(?:em|de)\s+(.+?)[.!]?$/i)) { Context.evento = m[1]; Context.setTopic(m[1]); return P("Entendi: você está pensando em " + toYou(m[1]) + "."); }
+      if (/\b(isso|essa ideia)\b/i.test(s) && /(boa ideia|m[áa] ideia|ruim|[óo]tima|legal|\bbom\b)/i.test(s) && !/\b(mora|est[áa]|tem)\b/i.test(s))
+        return Context.evento ? P("Entendi: sobre “" + Context.evento + "”, você acha que " + s.replace(/[.!]$/, "").replace(/^isso\s*/i, "isso ") .toLowerCase() + ".") : { acao: "PEDIR_ESCLARECIMENTO", texto: "A que você se refere com “isso”?" };
+    }
+    const pl = s.replace(/[.!?]+$/, "").match(new RegExp("^(" + CN + ")\\s+e\\s+(" + CN + ")\\s+(est[ãa]o|moram|trabalham|t[êe]m)\\b(.*)$"));
+    const cl = pl ? [pl[1] + " " + s.slice(pl[0].length - pl[4].length - pl[3].length).replace(/^(est[ãa]o)/, "está").replace(/^moram/, "mora").replace(/^trabalham/, "trabalha").replace(/^t[êe]m/, "tem"), pl[2] + " " + s.slice(pl[0].length - pl[4].length - pl[3].length).replace(/^(est[ãa]o)/, "está").replace(/^moram/, "mora").replace(/^trabalham/, "trabalha").replace(/^t[êe]m/, "tem")] : Interpreter.clauses(s);
+    let prev = null; const ack = [], items = [], foco = [], kind = Interpreter.kind(s);
+    for (const c of cl) {
+      const p = Interpreter.clause(c.replace(/[.!]+$/, ""), prev); if (!p) continue; prev = p.subj;
+      let e;
+      if (p.subj.user) e = EntityManager.user;
+      else if (p.subj.pron) { const r = EntityManager.resolvePron(p.subj.pron); if (r.amb) return this.clarify(r.amb, s); if (!r.e) return { acao: "PEDIR_ESCLARECIMENTO", texto: "Quem é " + (p.subj.pron === "ela" ? "ela" : "ele") + "? Ainda não tenho ninguém no contexto." }; if (r.conf < 0.7 && EntityManager.list.filter(x => x.tipo === "pessoa").length > 1) return this.clarify(EntityManager.list.filter(x => x.tipo === "pessoa" && x.id !== r.e.id).concat(r.e).slice(-2), s); e = r.e; }
+      else e = EntityManager.get(p.subj.nome, p.subj.rel);
+      if (e.tipo === "pessoa") { foco.push(e.id); prev = { nome: e.nome, rel: e.rel }; }
+      if (p.attr === "relacao") {
+        const b = EntityManager.get(p.valor); foco.push(b.id); const iv = EntityManager.addRel(e, p.relw, b);
+        ack.push(cap(who(e)) + " é " + p.relw + " de " + b.nome + (iv ? ". Deduzi também que " + b.nome + " é " + iv + " de " + e.nome : ""));
+        items.push({ camada: "usuario", categoria: "pessoa", chave: e.nome + " — relação com " + b.nome, valor: p.relw + " de " + b.nome, assunto: e.nome, ent: e.nome, rel: e.rel, attr: "relacao", importancia: 6 });
+        continue;
+      }
+      const r = EntityManager.addFact(e, p.attr, p.valor, { temp: p.temp || (p.attr === "estado" ? "hoje" : null), neg: p.neg });
+      if (r.conflito) return { acao: "CORRIGIR", texto: "Antes você me disse que " + phr(who(e), r.conflito, p.attr) + ", e agora que " + phr(who(e), { valor: p.valor, neg: p.neg }, p.attr) + ". Você quer corrigir a informação anterior ou está falando de outra situação?", pend: { k: "contra", e, a: p.attr, valor: p.valor, neg: p.neg, temp: p.temp } };
+      ack.push(cap(phr(who(e), { valor: p.valor, neg: p.neg, temp: p.temp || (p.attr === "estado" ? "hoje" : null) }, p.attr)));
+      if (p.temp === "hoje" && p.attr === "desejo" && (e.attrs.gosto || []).some(f => norm(p.valor).includes(norm(f.valor)) || norm(f.valor).includes(norm(p.valor)))) ack.push("Isso vale para hoje; não altera o que você gosta");
+      if (e.tipo === "pessoa" && !p.temp && !p.neg && p.attr !== "estado" && kind === "fato") items.push({ camada: "usuario", categoria: "pessoa", chave: e.nome + (e.rel ? " (" + e.rel + ")" : "") + " — " + p.attr, valor: p.valor, assunto: e.nome, ent: e.nome, rel: e.rel, attr: p.attr, importancia: 6 });
+    }
+    if (!ack.length) return null;
+    if (foco.length) { EntityManager.foco = [...new Set(foco)]; const last = EntityManager.list.find(x => x.id === foco[foco.length - 1]); if (last) Context.ultimaPessoa = last.nome; }
+    return P("Entendi: " + ack.map((a, i) => i === 0 && /^(Sua|Seu|Você)\b/.test(a) ? a[0].toLowerCase() + a.slice(1) : a).join(". ") + ".", { items: quiet ? [] : items, quiet, kind });
+  }
+};
+
+/* ---- DecisionEngine: escolhe a AÇÃO a partir dos planos (RESPONDER, PERGUNTAR, MEMORIZAR, CORRIGIR…) ---- */
+const DecisionEngine = {
+  run(plans) {
+    const ask = plans.find(p => p.acao === "PEDIR_ESCLARECIMENTO" || p.acao === "CORRIGIR");
+    if (ask) { if (ask.pend) pending = ask.pend; return say(ask.texto); }
+    const txt = plans.filter(p => p.texto).map(p => p.texto).join(" "), items = plans.flatMap(p => p.items || []);
+    if (items.length) { pending = { k: "mem", items, o: "conversa" }; return say(txt + "\nQuer que eu memorize isso?"); }
+    say(txt);
+  }
+};
+const Mind = {
+  async run(text, r) {
+    const sents = text.split(/(?<=[.?!])\s+/).map(s => s.trim()).filter(Boolean), plans = [];
+    if (r && r.intencao === "informar") { for (const s of sents) await ReasoningEngine.absorb(s, true); return false; }   // registra no contexto; Act.informar pede confirmação
+    for (const s of sents) {
+      if (Interpreter.kind(s) === "pergunta") for (const q of ReasoningEngine.splitQ(s)) plans.push(await ReasoningEngine.ask(q) || { acao: "NADA", q });
+      else plans.push(await ReasoningEngine.absorb(s) || { acao: "NADA" });
+    }
+    if (!plans.some(p => p.acao !== "NADA")) return false;
+    const ok = plans.filter(p => p.acao !== "NADA");
+    if (plans.length > ok.length) ok.push(P("Sobre o resto, não consegui entender com segurança."));
+    DecisionEngine.run(ok); return true;
+  }
+};
+/*ENDMIND*/
+
 /* ===== Act — execução das intenções ===== */
 let pending = null;
 const YES = /^(sim|s|pode|confirmo|confirmar|ok|claro|isso)\b/i;
@@ -950,6 +1241,7 @@ async function doConfirm(p) {
   }
 }
 
+const SYS = new Set("ajuda backup painel modo aprender_texto esquecer memorizar ensinar buscar_doc listar_docs mostrar capacidade saudacao despedida consultar_assunto".split(" "));
 async function handle(text) {
   text = text.trim();
   if (!text) return;
@@ -967,7 +1259,24 @@ async function handle(text) {
       // Se não for sim/não, reinterpreta a nova mensagem (pending foi limpo)
     }
 
+    if (pending && pending.k === "esclarece") {   // resposta a "você está falando de quem?"
+      const p = pending; pending = null;
+      const o = p.op.find(n => norm(text).includes(norm(n)));
+      if (o) { await Mind.run(p.s.replace(/\b(ele|ela)\b/i, o), {}); return; }
+      return say("Tudo bem, deixo isso de lado por enquanto.");
+    }
+    if (pending && pending.k === "contra") {   // contradição: corrigir ou outra situação?
+      const p = pending; pending = null;
+      if (/corrig|atualiz|mudou|sim|isso/i.test(text)) {
+        (p.e.attrs[p.a] = p.e.attrs[p.a] || []).push({ valor: p.valor, neg: !!p.neg, temp: p.temp || null, dia: today(), fonte: "correção", conf: 0.9 });
+        const it = { camada: "usuario", categoria: "pessoa", chave: p.e.nome + (p.e.rel ? " (" + p.e.rel + ")" : "") + " — " + p.a, valor: p.valor, assunto: p.e.nome, ent: p.e.nome, rel: p.e.rel, attr: p.a, importancia: 6 };
+        return ask({ k: "mem", items: [it], o: "correção" }, "Certo, usei a informação nova: " + cap(phr(who(p.e), { valor: p.valor, neg: p.neg }, p.a)) + ". Quer que eu memorize a correção?");
+      }
+      return say("Certo. Me diga de quem ou de que situação se trata, para eu não misturar as duas informações.");
+    }
     const r = Core.interpret(text, Context);
+    if (r.intencao === "informar" && (/[.?!]\s+\S/.test(text) || /\s(e|mas)\s+[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ]/.test(text))) r.intencao = "conversar";
+    if (!SYS.has(r.intencao) && await Mind.run(text, r)) { Context.ultimaIntencao = r.intencao; return; }
     Context.ultimaIntencao = r.intencao;
     Log.add("interpretado: " + r.tipo + " / " + r.intencao + " / conf=" + (r.confianca || 0).toFixed(2));
 
@@ -1212,6 +1521,7 @@ document.addEventListener("visibilitychange", () => { if (document.hidden) Episo
     if (idn) Cfg.v.nome = idn.valor;
     applyCfg();
     await switchMode("chat", true);
+    EntityManager.hydrate().catch(e => Log.add("hydrate", e));
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   } catch (e) {
     Log.add("init", e);
