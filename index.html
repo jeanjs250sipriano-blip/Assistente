@@ -161,7 +161,7 @@ const Cfg = {
     geminiKey: "",
     geminiLimit: 40,
     geminiEnabled: false,
-    geminiModel: "gemini-2.0-flash"
+    geminiModel: "gemini-3.8-flash"
   },
   async load() {
     const all = await DB.all("settings");
@@ -170,7 +170,7 @@ const Cfg = {
     if (this.v.nome === "Aurora") this.v.nome = "Rafinha";
     if (this.v.geminiLimit == null) this.v.geminiLimit = 40;
     if (this.v.geminiEnabled == null) this.v.geminiEnabled = false;
-    if (!this.v.geminiModel) this.v.geminiModel = "gemini-2.0-flash";
+    if (!this.v.geminiModel || this.v.geminiModel === "gemini-2.0-flash") this.v.geminiModel = "gemini-3.8-flash";
   },
   save() { return DB.put("settings", this.v); }
 };
@@ -560,7 +560,7 @@ const AIProvider = {
     if (!(await this.canUseGemini())) return null;
     const key = Cfg.v.geminiKey.trim();
     if (!key) return null;
-    const model = Cfg.v.geminiModel || "gemini-2.0-flash";
+    const model = Cfg.v.geminiModel || "gemini-3.8-flash";
     const nome = Cfg.v.nome || "Rafinha";
     const formal = Cfg.v.formal === "formal" ? "formal e educada" : "informal, amigável e natural";
     const tamanho = Cfg.v.tamanho === "detalhadas" ? "respostas um pouco mais detalhadas" : "respostas curtas e diretas";
