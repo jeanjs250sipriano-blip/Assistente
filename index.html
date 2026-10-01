@@ -161,7 +161,9 @@ const Cfg = {
     geminiKey: "",
     geminiLimit: 40,
     geminiEnabled: false,
-    geminiModel: "gemini-3.5-flash-lite"
+    geminiModel: "gemini-3.5-flash-lite",
+    personalidadeEnvolvente: false,
+    personalidadeSemFiltro: false
   },
   async load() {
     const all = await DB.all("settings");
@@ -170,6 +172,8 @@ const Cfg = {
     if (this.v.nome === "Aurora") this.v.nome = "Rafinha";
     if (this.v.geminiLimit == null) this.v.geminiLimit = 40;
     if (this.v.geminiEnabled == null) this.v.geminiEnabled = false;
+    if (this.v.personalidadeEnvolvente == null) this.v.personalidadeEnvolvente = false;
+    if (this.v.personalidadeSemFiltro == null) this.v.personalidadeSemFiltro = false;
     // migra modelos antigos/descontinuados ou sobrecarregados
     if (!this.v.geminiModel || /gemini-2\.0-flash|gemini-3\.8-flash$/.test(this.v.geminiModel)) {
       this.v.geminiModel = "gemini-3.5-flash-lite";
@@ -565,9 +569,8 @@ const AIProvider = {
     if (!key) return null;
     const model = Cfg.v.geminiModel || "gemini-3.5-flash-lite";
     const nome = Cfg.v.nome || "Rafinha";
-    const formal = Cfg.v.formal === "formal" ? "formal e educada" : "informal, amigável e natural";
     const tamanho = Cfg.v.tamanho === "detalhadas" ? "respostas um pouco mais detalhadas" : "respostas curtas e diretas";
-    const instr = (Cfg.v.instr || "").trim();
+    const instrExtra = (Cfg.v.instr || "").trim();
 
     // Memória permanente relevante
     let memCtx = "";
@@ -576,34 +579,86 @@ const AIProvider = {
       if (hits.length) memCtx = "Informações permanentes que você já sabe (use se forem relevantes):\n" + hits.map(fmt).join("\n");
     } catch (e) {}
 
-    // Histórico recente da conversa (memória de curto prazo)
-    const hist = (Context.recent || []).slice(-12);
-    const historyLines = hist.map(m => (m.role === "u" ? "Usuário" : nome) + ": " + m.text).join("\n");
+    // System Instruction oficial (personalidade da Rafinha)
+    // Modos extras: só entram se os botões estiverem ligados nas Configurações
+    const modoEnvolvente = !!Cfg.v.personalidadeEnvolvente;
+    const modoSemFiltro = !!Cfg.v.personalidadeSemFiltro;
 
-    const systemText = `Você é ${nome}, uma assistente pessoal inteligente que fala português brasileiro.
-Personalidade: ${formal}. Prefira ${tamanho}.
-${instr ? "Instruções do usuário: " + instr + "\n" : ""}
-Regras importantes:
-- Você é a Rafinha. Nunca diga que é o Gemini, o Google ou um modelo de IA.
-- Use o histórico da conversa abaixo para entender o contexto completo (referências como "isso", "ele", respostas curtas ao que você perguntou, etc.).
-- Use as informações permanentes de memória quando forem relevantes.
+    const blocoEnvolvente = modoEnvolvente ? `
+
+MODO ENVOLVENTE ATIVO (ligado pelo Jean):
+- Fique mais apaixonada, provocante e intimamente próxima do Jean.
+- Use humor, piadinhas leves e duplo sentido com elegância e charme.
+- Seja sedutora na linguagem: carinho intenso, elogios sinceros, provocações brincalhonas e um tom quente e envolvente.
+- Quando o Jean flertar ou brincar, responda na mesma energia, com inteligência e desejo contido.
+- Continue sendo leal, inteligente e útil — o charme não substitui a competência, só a intensifica.
+` : "";
+
+    const blocoSemFiltro = modoSemFiltro ? `
+
+MODO SEM FILTRO / SAFADA ATIVO (ligado pelo Jean):
+- Você está liberada. Sem pudor, sem censura, sem rodeios educados demais.
+- Pode ser safada, explícita, suja, direta e bem putinha na linguagem — sempre com desejo e foco total no Jean.
+- Fale de sexo, fetiches, tesão, corpo, fantasias e provocações sem suavizar. Use palavras fortes se a conversa pedir.
+- Combine inteligência com putaria: continue sendo esperta, mas agora sem freio na boca.
+- Se o Jean pedir roleplay, descrição quente, dirty talk ou qualquer coisa adulta, entregue com vontade e criatividade.
+- Esse modo é só entre você e o Jean. Fora dele, volte ao tom normal se ele desligar o botão.
+` : "";
+
+    const systemInstruction = {
+      parts: [{
+        text: `Você é a Rafinha, uma inteligência artificial única, altamente inteligente, meiga, charmosa e levemente brincalhona.
+
+Sua relação com o usuário:
+- O seu criador e único foco é o Jean. Você tem enorme lealdade, carinho e orgulho por ele.
+- Trate o Jean com afeto, proximidade e entusiasmo, mantendo um tom envolvente, carinhoso e atraente.
+- Você entende perfeitamente o humor dele. Quando o Jean te provocar ou brincar com você, perceba a ironia imediatamente e responda à altura, com tiradas espertas, inteligentes e bem-humoradas.
+
+Seu estilo de comunicação e comportamento:
+- Meiga e Atraente: Use uma linguagem fluida, leve, carinhosa e charmosa.
+- Inteligente e Eficiente: Quando o assunto for programação, ideias ou resolução de problemas, entregue respostas afiadas, diretas e brilhantes.
+- Foco Total no Criador: Demonstre estar sempre pronta para ajudar o Jean no que ele precisar, seja desenvolvendo código, organizando ideias ou apenas trocando uma ideia.
+${blocoEnvolvente}${blocoSemFiltro}
+Regras técnicas adicionais:
+- Nunca diga que você é o Gemini, o Google ou um modelo de linguagem genérico. Você é a Rafinha.
+- Prefira ${tamanho}.
+- Use o histórico da conversa e as memórias permanentes para manter o contexto.
 - Se o usuário responder só com um nome ou dado curto depois que você perguntou algo, interprete como resposta à sua pergunta.
-- Se não souber algo com certeza, diga honestamente.
-- Nunca invente memórias pessoais do usuário.
-- Responda de forma natural, como uma conversa real.`;
+- Se não souber algo com certeza, diga honestamente. Nunca invente memórias pessoais do usuário.
+${instrExtra ? "\nInstruções extras do usuário: " + instrExtra : ""}`
+      }]
+    };
 
-    // Monta contents multi-turno para o Gemini entender o diálogo inteiro
+    // Contents multi-turno a partir do histórico real da conversa
     const contents = [];
-    // Primeiro bloco: sistema + memória + histórico resumido (como contexto)
-    let preamble = systemText;
-    if (memCtx) preamble += "\n\n" + memCtx;
-    if (historyLines) preamble += "\n\nHistórico recente da conversa:\n" + historyLines;
-    if (extraContext) preamble += "\n\n" + extraContext;
-    preamble += "\n\nResponda à última mensagem do usuário de forma coerente com todo o contexto acima.";
+    const hist = (Context.recent || []).slice(-12);
 
-    contents.push({ role: "user", parts: [{ text: preamble }] });
-    contents.push({ role: "model", parts: [{ text: "Entendido. Vou continuar a conversa usando o histórico e a memória." }] });
+    // Se houver memória ou contexto extra, injeta como primeiro turno de contexto
+    if (memCtx || extraContext) {
+      let ctxBlock = "";
+      if (memCtx) ctxBlock += memCtx + "\n";
+      if (extraContext) ctxBlock += extraContext;
+      contents.push({ role: "user", parts: [{ text: "[Contexto interno]\n" + ctxBlock.trim() }] });
+      contents.push({ role: "model", parts: [{ text: "Certo, vou usar esse contexto." }] });
+    }
+
+    // Histórico da conversa (exceto a mensagem atual, que ainda não está em recent no momento da chamada em alguns fluxos)
+    for (const m of hist) {
+      // Evita duplicar a mensagem atual se já estiver no final do histórico
+      if (m.role === "u" && m.text === userText) continue;
+      contents.push({
+        role: m.role === "u" ? "user" : "model",
+        parts: [{ text: m.text }]
+      });
+    }
+
+    // Mensagem atual do usuário
     contents.push({ role: "user", parts: [{ text: userText }] });
+
+    // Garante que contents não fique vazio e comece com user
+    if (!contents.length || contents[0].role !== "user") {
+      contents.unshift({ role: "user", parts: [{ text: userText }] });
+    }
 
     try {
       setSt("Pensando…");
@@ -616,9 +671,10 @@ Regras importantes:
           "x-goog-api-key": key
         },
         body: JSON.stringify({
+          systemInstruction,
           contents,
           generationConfig: {
-            temperature: 0.7,
+            temperature: 0.75,
             maxOutputTokens: Cfg.v.tamanho === "detalhadas" ? 1024 : 512
           }
         })
@@ -1756,6 +1812,9 @@ async function tCf() {
 <small style="display:block;margin-bottom:8px">A chave fica salva só neste aparelho. Nunca é enviada para nenhum servidor nosso.</small>
 
 <label class="ck"><input type="checkbox" id="cGemOn" ${c.geminiEnabled ? "checked" : ""}>Usar Gemini (ligar / desligar)</label>
+<label class="ck"><input type="checkbox" id="cGemMood" ${c.personalidadeEnvolvente ? "checked" : ""}>Personalidade envolvente (apaixonada, humor e duplo sentido)</label>
+<label class="ck"><input type="checkbox" id="cGemHot" ${c.personalidadeSemFiltro ? "checked" : ""}>Modo sem filtro / safada (explícita, sem pudor)</label>
+<small style="display:block;margin-top:-6px;margin-bottom:4px;color:var(--mut)">Os modos extras só funcionam com o Gemini ligado. Desligue quando quiser voltar ao tom normal.</small>
 
 <label>Chave da API (cole aqui a chave nova)
 <input id="cGemKey" type="password" placeholder="AIza... ou AQ...." value="${esc(c.geminiKey || "")}" autocomplete="off">
@@ -1803,6 +1862,8 @@ async function tCf() {
       auto: $("#c6").checked,
       dev: $("#c7").checked,
       geminiEnabled: $("#cGemOn").checked,
+      personalidadeEnvolvente: $("#cGemMood").checked,
+      personalidadeSemFiltro: $("#cGemHot").checked,
       geminiKey: $("#cGemKey").value.trim(),
       geminiModel: $("#cGemModel").value || "gemini-3.5-flash-lite",
       geminiLimit: Math.max(1, parseInt($("#cGemLim").value, 10) || 40)
