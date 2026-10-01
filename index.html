@@ -149,12 +149,28 @@ const DB = (() => {
 
 /* ===== PersonaManager / Config ===== */
 const Cfg = {
-  v: { id: "cfg", nome: "Rafinha", formal: "informal", tamanho: "curtas", voz: "", auto: false, dev: false, instr: "" },
+  v: {
+    id: "cfg",
+    nome: "Rafinha",
+    formal: "informal",
+    tamanho: "curtas",
+    voz: "",
+    auto: false,
+    dev: false,
+    instr: "",
+    geminiKey: "",
+    geminiLimit: 40,
+    geminiEnabled: false,
+    geminiModel: "gemini-2.0-flash"
+  },
   async load() {
     const all = await DB.all("settings");
     const c = all.find(x => x.id === "cfg");
     if (c) Object.assign(this.v, c);
     if (this.v.nome === "Aurora") this.v.nome = "Rafinha";
+    if (this.v.geminiLimit == null) this.v.geminiLimit = 40;
+    if (this.v.geminiEnabled == null) this.v.geminiEnabled = false;
+    if (!this.v.geminiModel) this.v.geminiModel = "gemini-2.0-flash";
   },
   save() { return DB.put("settings", this.v); }
 };
@@ -173,7 +189,8 @@ const Capabilities = {
     "reconhecimento e síntese de voz (quando o navegador permitir)",
     "raciocinar sobre pessoas, relações, tempo e comparações simples (regras locais)",
     "backup e restauração local (JSON)",
-    "modo treinamento separado"
+    "modo treinamento separado",
+    "Gemini (IA externa) opcional — ligar/desligar nas Configurações"
   ],
   canInterpret() { return true; },
   canLearn() { return true; },
@@ -183,7 +200,7 @@ const Capabilities = {
   answer(q) {
     const n = norm(q);
     if (/interpret(ar|a)|entender|compreender/.test(n))
-      return "Sim. Interpreto mensagens por regras locais: identifico intenção, sujeito, referências e contexto. Ainda não uso modelo de linguagem externo.";
+      return "Sim. Interpreto mensagens por regras locais (intenção, sujeito, referências e contexto). Quando o Gemini estiver ligado nas Configurações, também uso o modelo de linguagem para respostas mais naturais.";
     if (/aprender|aprender|ensinar|treinar/.test(n))
       return "Sim. Posso aprender textos, documentos e informações que você me ensinar. No Modo Treinamento ou com comandos como “memorize” / “aprenda”, mostro o que entendi e só salvo após sua confirmação.";
     if (/lembrar|mem[oó]ria|guardar|memorizar/.test(n))
@@ -196,8 +213,13 @@ const Capabilities = {
       return "Sim. Todo o processamento de linguagem é orientado ao português brasileiro.";
     if (/documento|arquivo|pdf|txt/.test(n))
       return "Sim. Importo TXT, MD, JSON, CSV, HTML e PDF (texto extraível). Analiso, resumo e, após confirmação, aprendo como conhecimento.";
+    if (/gemini|modelo de (ia|linguagem)|inteligencia artificial/.test(n))
+      return Cfg.v.geminiEnabled && Cfg.v.geminiKey
+        ? "Sim. O Gemini está ligado. Posso usá-lo para respostas mais naturais quando as regras locais não bastam. Você controla pelo botão nas Configurações."
+        : "Tenho suporte ao Gemini, mas ele está desligado ou sem chave. Vá em ☰ → Config, cole a chave e ligue o botão “Usar Gemini”.";
     if (/capacidade|consegue|sabe fazer|o que voc[eê] (pode|sabe)/.test(n))
-      return "Minhas capacidades atuais:\n• " + this.list.join("\n• ") + "\n\nNão há modelo de IA externo conectado. Tudo roda localmente neste aparelho.";
+      return "Minhas capacidades atuais:\n• " + this.list.join("\n• ") +
+        (Cfg.v.geminiEnabled && Cfg.v.geminiKey ? "\n\nGemini está ligado." : "\n\nGemini está desligado (ative em Configurações se quiser).");
     return null;
   }
 };
@@ -500,11 +522,113 @@ const Search = {
   }
 };
 
-/* ===== AIProvider (stub honesto) ===== */
+/* ===== AIProvider (LocalRules + Gemini opcional) ===== */
+const GeminiUsage = {
+  async get() {
+    const all = await DB.all("settings");
+    let u = all.find(x => x.id === "geminiUsage");
+    const d = today();
+    if (!u || u.date !== d) {
+      u = { id: "geminiUsage", date: d, count: 0 };
+      await DB.put("settings", u);
+    }
+    return u;
+  },
+  async inc() {
+    const u = await this.get();
+    u.count = (u.count || 0) + 1;
+    await DB.put("settings", u);
+    return u.count;
+  },
+  async remaining() {
+    const u = await this.get();
+    const lim = Cfg.v.geminiLimit || 40;
+    return Math.max(0, lim - (u.count || 0));
+  }
+};
+
 const AIProvider = {
-  nome: "LocalRules",
-  async generateResponse() { return null; },
+  get nome() {
+    return (Cfg.v.geminiEnabled && Cfg.v.geminiKey) ? "Gemini + LocalRules" : "LocalRules";
+  },
+  async canUseGemini() {
+    if (!Cfg.v.geminiEnabled || !Cfg.v.geminiKey) return false;
+    const left = await GeminiUsage.remaining();
+    return left > 0;
+  },
+  async generateResponse(userText, extraContext) {
+    if (!(await this.canUseGemini())) return null;
+    const key = Cfg.v.geminiKey.trim();
+    if (!key) return null;
+    const model = Cfg.v.geminiModel || "gemini-2.0-flash";
+    const nome = Cfg.v.nome || "Rafinha";
+    const formal = Cfg.v.formal === "formal" ? "formal e educada" : "informal, amigável e natural";
+    const tamanho = Cfg.v.tamanho === "detalhadas" ? "respostas um pouco mais detalhadas" : "respostas curtas e diretas";
+    const instr = (Cfg.v.instr || "").trim();
+
+    let memCtx = "";
+    try {
+      const hits = await Retrieve.find(userText, 4);
+      if (hits.length) memCtx = "\n\nInformações que você já sabe (use se forem relevantes):\n" + hits.map(fmt).join("\n");
+    } catch (e) {}
+
+    const system = `Você é ${nome}, uma assistente pessoal inteligente que fala português brasileiro.
+Personalidade: ${formal}. Prefira ${tamanho}.
+${instr ? "Instruções do usuário: " + instr + "\n" : ""}
+Regras importantes:
+- Você é a Rafinha. Não diga que é o Gemini ou o Google.
+- Use as informações de memória/conhecimento fornecidas quando forem relevantes.
+- Se não souber algo com certeza, diga honestamente.
+- Nunca invente memórias pessoais do usuário.
+- Responda de forma natural, como uma conversa real.`;
+
+    const prompt = system + memCtx + (extraContext ? "\n\n" + extraContext : "") + "\n\nMensagem do usuário: " + userText;
+
+    try {
+      setSt("Pensando…");
+      $("#dot").className = "dot busy";
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": key
+        },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: Cfg.v.tamanho === "detalhadas" ? 1024 : 512
+          }
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        const msg = (data.error && data.error.message) || ("Erro HTTP " + res.status);
+        Log.add("gemini erro", msg);
+        if (res.status === 429) return { error: "Limite do Gemini atingido (quota). Tente mais tarde ou aumente o limite diário." };
+        if (res.status === 400 || res.status === 403) return { error: "Chave inválida ou sem permissão. Verifique nas Configurações." };
+        return { error: msg };
+      }
+      const text = data.candidates && data.candidates[0] && data.candidates[0].content &&
+        data.candidates[0].content.parts && data.candidates[0].content.parts[0] &&
+        data.candidates[0].content.parts[0].text;
+      if (!text) return { error: "Resposta vazia do modelo." };
+      await GeminiUsage.inc();
+      return { text: text.trim() };
+    } catch (e) {
+      Log.add("gemini fetch", e);
+      return { error: "Falha de rede ou CORS: " + (e.message || e) };
+    } finally {
+      setSt("Pronta");
+      $("#dot").className = "dot";
+    }
+  },
   async summarize(t) {
+    if (await this.canUseGemini()) {
+      const r = await this.generateResponse("Resuma em no máximo 2 frases o texto a seguir:\n\n" + t.slice(0, 3000));
+      if (r && r.text) return r.text;
+    }
     const s = t.split(/(?<=[.!?])\s+/).filter(Boolean);
     return s.slice(0, 2).join(" ").slice(0, 220);
   },
@@ -512,7 +636,16 @@ const AIProvider = {
     return /^(meu|minha|me chamo)/i.test(t) ? "memoria" : /^prefiro/i.test(t) ? "preferencia" : "conversa";
   },
   async extractMemory() { return []; },
-  async analyzeDocument(d) { return { resumo: d.chunks[0].slice(0, 200) }; }
+  async analyzeDocument(d) { return { resumo: d.chunks[0].slice(0, 200) }; },
+  async testKey() {
+    if (!Cfg.v.geminiKey) return { ok: false, msg: "Nenhuma chave configurada." };
+    const oldEnabled = Cfg.v.geminiEnabled;
+    Cfg.v.geminiEnabled = true;
+    const r = await this.generateResponse("Responda apenas com a palavra OK.");
+    Cfg.v.geminiEnabled = oldEnabled;
+    if (r && r.text) return { ok: true, msg: "Chave válida! Resposta: " + r.text.slice(0, 40) };
+    return { ok: false, msg: (r && r.error) || "Falha no teste." };
+  }
 };
 
 /* ===== AndroidBridge / Sync / Tools ===== */
@@ -1282,10 +1415,26 @@ const Act = {
     }
 
     if (r.tipo === "pergunta") {
-      // Última tentativa: capacidade?
+      // Última tentativa local: capacidade?
       const cap = Capabilities.answer(r.t);
       if (cap) return say(cap);
-      return say("Não encontrei nada guardado sobre isso. Ainda não tenho um modelo de IA conectado para responder de outra forma. Você pode me ensinar no Modo Treinamento.");
+
+      // Fallback Gemini (só se o botão estiver ligado e houver cota)
+      if (await AIProvider.canUseGemini()) {
+        const gem = await AIProvider.generateResponse(r.t);
+        if (gem && gem.text) return say(gem.text);
+        if (gem && gem.error) return say("Não consegui usar a IA agora: " + gem.error + "\nVocê pode me ensinar no Modo Treinamento.");
+      }
+      return say("Não encontrei nada guardado sobre isso. " +
+        (Cfg.v.geminiEnabled ? "O Gemini está ligado, mas não consegui obter resposta (verifique a chave ou o limite diário)." :
+          "Ative o Gemini nas Configurações (☰ → Config) se quiser que eu use IA para responder.") +
+        " Você também pode me ensinar no Modo Treinamento.");
+    }
+
+    // Afirmações / conversa livre → tenta Gemini se ligado
+    if (await AIProvider.canUseGemini() && r.t.length >= 8) {
+      const gem = await AIProvider.generateResponse(r.t);
+      if (gem && gem.text) return say(gem.text);
     }
 
     const w = Worth.assess(r.t);
@@ -1457,7 +1606,8 @@ function openSheet(t = "mem") {
     b.onclick = () => openSheet(k);
     $("#tabs").appendChild(b);
   }
-  ({ mem: tMem, apr: tApr, bk: tBk, cf: tCf, dg: tDg })[t]();
+  const fn = ({ mem: tMem, apr: tApr, bk: tBk, cf: tCf, dg: tDg })[t];
+  if (fn) Promise.resolve(fn()).catch(e => Log.add("sheet", e));
 }
 const B = () => { const b = $("#body"); b.innerHTML = ""; return b; };
 const el = (h, p) => { const d = document.createElement("div"); d.className = "it"; d.innerHTML = h; (p || $("#body")).appendChild(d); return d; };
@@ -1539,23 +1689,101 @@ function tBk() {
   i.appendChild(f);
 }
 
-function tCf() {
+async function tCf() {
   const b = B(), c = Cfg.v;
+  const usage = await GeminiUsage.get();
+  const lim = c.geminiLimit || 40;
+  const used = usage.count || 0;
+  const pct = Math.min(100, Math.round((used / lim) * 100));
+  const barColor = pct >= 90 ? "#e5484d" : pct >= 70 ? "#f5a524" : "#3bb273";
+
   const d = el(`<label>Nome da assistente<input id="c1" value="${esc(c.nome)}"></label>
 <label>Formalidade<select id="c2"><option value="informal">Informal</option><option value="formal">Formal</option></select></label>
 <label>Tamanho das respostas<select id="c3"><option value="curtas">Curtas</option><option value="detalhadas">Detalhadas</option></select></label>
 <label>Voz<select id="c4"><option value="">Automática (feminina, jovem)</option>${Voice.voices().map(v => `<option>${esc(v.name)}</option>`).join("")}</select></label>
-<label>Instruções principais (guardadas para o futuro provedor de IA)<textarea id="c5" rows="3">${esc(c.instr)}</textarea></label>
+<label>Instruções principais (personalidade / regras para a IA)<textarea id="c5" rows="3">${esc(c.instr)}</textarea></label>
 <label class="ck"><input type="checkbox" id="c6" ${c.auto ? "checked" : ""}>Falar respostas automaticamente</label>
-<label class="ck"><input type="checkbox" id="c7" ${c.dev ? "checked" : ""}>Modo desenvolvedor</label>`);
+<label class="ck"><input type="checkbox" id="c7" ${c.dev ? "checked" : ""}>Modo desenvolvedor</label>
+
+<hr style="border:none;border-top:1px solid var(--bd);margin:8px 0">
+<b style="font-size:15px">Gemini (IA)</b>
+<small style="display:block;margin-bottom:8px">A chave fica salva só neste aparelho. Nunca é enviada para nenhum servidor nosso.</small>
+
+<label class="ck"><input type="checkbox" id="cGemOn" ${c.geminiEnabled ? "checked" : ""}>Usar Gemini (ligar / desligar)</label>
+
+<label>Chave da API (cole aqui a chave nova)
+<input id="cGemKey" type="password" placeholder="AIza... ou AQ...." value="${esc(c.geminiKey || "")}" autocomplete="off">
+</label>
+
+<label>Limite diário de chamadas
+<input id="cGemLim" type="number" min="1" max="500" value="${lim}">
+</label>
+
+<div style="margin:6px 0 4px;font-size:13px;color:var(--mut)">Uso hoje: <b id="gemUsed">${used}</b> / <span id="gemLimLab">${lim}</span></div>
+<div style="height:10px;background:var(--bd);border-radius:6px;overflow:hidden">
+  <div id="gemBar" style="height:100%;width:${pct}%;background:${barColor};transition:width .3s"></div>
+</div>
+<small style="display:block;margin-top:4px">O contador zera automaticamente todo dia.</small>
+
+<div class="row" style="margin-top:10px">
+  <button id="cGemTest" type="button">Testar chave</button>
+  <button id="cGemClear" type="button">Limpar chave</button>
+</div>
+<small id="cGemMsg" style="display:block;margin-top:6px;min-height:1.2em"></small>`);
+
   d.style.cssText = "display:flex;flex-direction:column;gap:12px";
   $("#c2").value = c.formal;
   $("#c3").value = c.tamanho;
   $("#c4").value = c.voz;
-  d.onchange = d.oninput = async () => {
-    Object.assign(c, { nome: $("#c1").value || "Rafinha", formal: $("#c2").value, tamanho: $("#c3").value, voz: $("#c4").value, instr: $("#c5").value, auto: $("#c6").checked, dev: $("#c7").checked });
+
+  const saveAll = async () => {
+    Object.assign(c, {
+      nome: $("#c1").value || "Rafinha",
+      formal: $("#c2").value,
+      tamanho: $("#c3").value,
+      voz: $("#c4").value,
+      instr: $("#c5").value,
+      auto: $("#c6").checked,
+      dev: $("#c7").checked,
+      geminiEnabled: $("#cGemOn").checked,
+      geminiKey: $("#cGemKey").value.trim(),
+      geminiLimit: Math.max(1, parseInt($("#cGemLim").value, 10) || 40)
+    });
     await Cfg.save();
     applyCfg();
+    // atualiza barra
+    const u = await GeminiUsage.get();
+    const L = c.geminiLimit;
+    const U = u.count || 0;
+    const P = Math.min(100, Math.round((U / L) * 100));
+    const col = P >= 90 ? "#e5484d" : P >= 70 ? "#f5a524" : "#3bb273";
+    $("#gemUsed").textContent = U;
+    $("#gemLimLab").textContent = L;
+    const bar = $("#gemBar");
+    if (bar) { bar.style.width = P + "%"; bar.style.background = col; }
+  };
+
+  d.onchange = d.oninput = saveAll;
+
+  $("#cGemTest").onclick = async () => {
+    const msg = $("#cGemMsg");
+    msg.textContent = "Testando…";
+    msg.style.color = "var(--mut)";
+    await saveAll();
+    const r = await AIProvider.testKey();
+    msg.textContent = r.msg;
+    msg.style.color = r.ok ? "#3bb273" : "#e5484d";
+  };
+
+  $("#cGemClear").onclick = async () => {
+    if (!confirm("Remover a chave deste aparelho?")) return;
+    $("#cGemKey").value = "";
+    c.geminiKey = "";
+    c.geminiEnabled = false;
+    $("#cGemOn").checked = false;
+    await Cfg.save();
+    $("#cGemMsg").textContent = "Chave removida.";
+    $("#cGemMsg").style.color = "var(--mut)";
   };
 }
 
@@ -1575,7 +1803,10 @@ async function tDg() {
     ["Android", AndroidBridge.isAvailable()]
   ];
   el(rows.map(r => (r[1] ? "✅ " : "❌ ") + esc(r[0])).join("<br>"));
-  el("<b>Camadas</b><br>IA: " + AIProvider.nome + " (sem modelo)<br>Sync: " + SyncProvider.nome + "<br>Ferramentas: " + Object.keys(Tools.list).join(", "));
+  const left = await GeminiUsage.remaining();
+  el("<b>Camadas</b><br>IA: " + AIProvider.nome +
+    (Cfg.v.geminiEnabled ? " · ligado · restam " + left + " chamadas hoje" : " · desligado") +
+    "<br>Sync: " + SyncProvider.nome + "<br>Ferramentas: " + Object.keys(Tools.list).join(", "));
   el("<b>Capacidades</b><br>• " + Capabilities.list.join("<br>• "));
   if (Cfg.v.dev) {
     el("<b>Logs</b><pre>" + esc(Log.items.slice(-40).join("\n") || "(vazio)") + "</pre>");
