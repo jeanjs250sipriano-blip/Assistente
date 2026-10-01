@@ -749,26 +749,93 @@ Tools.register("documentos.buscar", "Busca em documentos", q => Search.docs(q));
 const Voice = (() => {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   let rec = null;
+  let listening = false; // modo contínuo: só para quando o usuário clicar de novo
+  let finalAcc = "";     // texto final acumulado entre pausas
   const ok = () => !!SR;
   const synOk = () => "speechSynthesis" in window;
-  function listen(onText, onEnd) {
+
+  function listen(onText, onStop) {
     if (!SR) return sys("Este navegador não oferece suporte a reconhecimento de voz.");
-    rec = new SR();
-    rec.lang = "pt-BR";
-    rec.interimResults = true;
-    let fin = "";
-    rec.onresult = e => { let t = ""; for (const r of e.results) t += r[0].transcript; fin = t; onText(t); };
-    rec.onerror = e => {
-      Log.add("voz erro", e.error);
-      sys(e.error === "not-allowed" ? "Não foi possível acessar o microfone (permissão negada)." : "Erro no reconhecimento de voz: " + e.error);
+    if (listening) return; // já está ouvindo
+    listening = true;
+    finalAcc = ($("#in").value || "").trim(); // preserva o que já estava no campo
+    if (finalAcc) finalAcc += " ";
+
+    const startRec = () => {
+      if (!listening) return;
+      rec = new SR();
+      rec.lang = "pt-BR";
+      rec.continuous = true;
+      rec.interimResults = true;
+      let sessionFinal = "";
+
+      rec.onresult = e => {
+        let interim = "";
+        sessionFinal = "";
+        for (let i = 0; i < e.results.length; i++) {
+          const r = e.results[i];
+          if (r.isFinal) sessionFinal += r[0].transcript;
+          else interim += r[0].transcript;
+        }
+        const full = (finalAcc + sessionFinal + (interim ? (sessionFinal || finalAcc ? " " : "") + interim : "")).replace(/\s+/g, " ").trim();
+        onText(full);
+        // quando fecha um trecho final, incorpora no acumulado
+        if (sessionFinal) {
+          finalAcc = (finalAcc + sessionFinal).replace(/\s+/g, " ").trim() + " ";
+        }
+      };
+
+      rec.onerror = e => {
+        Log.add("voz erro", e.error);
+        if (e.error === "not-allowed") {
+          listening = false;
+          sys("Não foi possível acessar o microfone (permissão negada).");
+          onStop(finalAcc.trim());
+        } else if (e.error !== "aborted" && e.error !== "no-speech") {
+          // outros erros: tenta continuar se ainda estiver no modo contínuo
+        }
+      };
+
+      rec.onend = () => {
+        rec = null;
+        // Se o usuário ainda quer ouvir, reinicia automaticamente (permite pausas)
+        if (listening) {
+          try { startRec(); } catch (err) {
+            listening = false;
+            onStop(finalAcc.trim());
+          }
+        } else {
+          onStop(finalAcc.trim());
+        }
+      };
+
+      try { rec.start(); } catch (e) {
+        listening = false;
+        sys("Não foi possível iniciar o microfone.");
+        onStop(finalAcc.trim());
+      }
     };
-    rec.onend = () => { rec = null; onEnd(fin); };
-    try { rec.start(); } catch (e) { sys("Não foi possível iniciar o microfone."); }
+
+    startRec();
   }
+
   const cancel = () => {
+    listening = false;
     if (rec) {
-      rec.onend = () => { rec = null; setSt("Pronta"); $("#dot").className = "dot"; };
-      rec.abort();
+      try { rec.abort(); } catch (e) {}
+      rec = null;
+    }
+    setSt("Pronta");
+    $("#dot").className = "dot";
+  };
+
+  const stop = () => {
+    // Para o modo contínuo sem abortar de forma brusca
+    listening = false;
+    if (rec) {
+      try { rec.stop(); } catch (e) {
+        try { rec.abort(); } catch (e2) {}
+      }
     }
   };
   function speak(t) {
@@ -800,24 +867,123 @@ const Voice = (() => {
     };
     return pt.sort((a, b) => sc(b) - sc(a))[0] || null;
   }
-  return { ok, synOk, listen, cancel, speak, pick, active: () => !!rec, voices: () => synOk() ? speechSynthesis.getVoices().filter(v => v.lang.startsWith("pt")) : [] };
+  return {
+    ok,
+    synOk,
+    listen,
+    cancel,
+    stop,
+    speak,
+    pick,
+    active: () => listening || !!rec,
+    voices: () => synOk() ? speechSynthesis.getVoices().filter(v => v.lang.startsWith("pt")) : []
+  };
 })();
 
 /* ===== Conversation / Session / Episodes ===== */
 const chat = $("#chat");
 let modo = "chat";
 function setSt(t) { $("#st").textContent = t; }
+function downloadBlob(content, filename, mime) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([content], { type: mime || "text/plain;charset=utf-8" }));
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+function extractCodeBlocks(text) {
+  // Detecta blocos ```lang ... ``` e também HTML solto
+  const blocks = [];
+  const re = /```(\w*)\n?([\s\S]*?)```/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const lang = (m[1] || "").toLowerCase();
+    const code = m[2].trim();
+    if (!code) continue;
+    let ext = "txt", mime = "text/plain;charset=utf-8";
+    if (lang === "html" || lang === "htm" || /^<!doctype html|<html[\s>]/i.test(code)) {
+      ext = "html"; mime = "text/html;charset=utf-8";
+    } else if (lang === "css") { ext = "css"; mime = "text/css;charset=utf-8"; }
+    else if (lang === "js" || lang === "javascript") { ext = "js"; mime = "text/javascript;charset=utf-8"; }
+    else if (lang === "json") { ext = "json"; mime = "application/json;charset=utf-8"; }
+    else if (lang === "md" || lang === "markdown") { ext = "md"; mime = "text/markdown;charset=utf-8"; }
+    else if (lang === "py" || lang === "python") { ext = "py"; }
+    else if (lang === "csv") { ext = "csv"; mime = "text/csv;charset=utf-8"; }
+    blocks.push({ code, ext, mime, lang: lang || "texto" });
+  }
+  // HTML completo sem fence
+  if (!blocks.length && /<!doctype html|<html[\s>]/i.test(text) && text.length > 80) {
+    blocks.push({ code: text.trim(), ext: "html", mime: "text/html;charset=utf-8", lang: "html" });
+  }
+  return blocks;
+}
+
 function bubble(role, text, save = true) {
   const d = document.createElement("div");
   d.className = "m " + role;
   d.textContent = text;
+
+  const actions = document.createElement("div");
+  actions.className = "sp";
+  actions.style.display = "flex";
+  actions.style.flexWrap = "wrap";
+  actions.style.gap = "8px";
+  actions.style.marginTop = "6px";
+
+  // Copiar
+  const bCopy = document.createElement("span");
+  bCopy.textContent = "📋 copiar";
+  bCopy.style.cursor = "pointer";
+  bCopy.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      bCopy.textContent = "✅ copiado";
+      setTimeout(() => { bCopy.textContent = "📋 copiar"; }, 1500);
+    } catch (e) {
+      // fallback
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      bCopy.textContent = "✅ copiado";
+      setTimeout(() => { bCopy.textContent = "📋 copiar"; }, 1500);
+    }
+  };
+  actions.appendChild(bCopy);
+
   if (role === "a") {
-    const s = document.createElement("span");
-    s.className = "sp";
-    s.textContent = "🔊 ouvir";
-    s.onclick = () => Voice.speak(text);
-    d.appendChild(s);
+    const bSpeak = document.createElement("span");
+    bSpeak.textContent = "🔊 ouvir";
+    bSpeak.style.cursor = "pointer";
+    bSpeak.onclick = () => Voice.speak(text);
+    actions.appendChild(bSpeak);
+
+    // Botões de download para blocos de código / HTML
+    const blocks = extractCodeBlocks(text);
+    blocks.forEach((b, i) => {
+      const btn = document.createElement("span");
+      const name = "rafinha-" + (b.lang || "arquivo") + (blocks.length > 1 ? "-" + (i + 1) : "") + "." + b.ext;
+      btn.textContent = "⬇ " + b.ext.toUpperCase();
+      btn.title = "Baixar " + name;
+      btn.style.cursor = "pointer";
+      btn.onclick = () => downloadBlob(b.code, name, b.mime);
+      actions.appendChild(btn);
+    });
+
+    // Se não houver bloco, mas o texto for longo e parecer código/arquivo, oferece TXT
+    if (!blocks.length && text.length > 200 && (/function |const |let |class |import |<!|<div|<style|def |SELECT /i.test(text))) {
+      const btn = document.createElement("span");
+      btn.textContent = "⬇ TXT";
+      btn.style.cursor = "pointer";
+      btn.onclick = () => downloadBlob(text, "rafinha-texto.txt", "text/plain;charset=utf-8");
+      actions.appendChild(btn);
+    }
   }
+
+  d.appendChild(actions);
   chat.appendChild(d);
   chat.scrollTop = chat.scrollHeight;
   if (save && role !== "s") DB.put("messages", { id: uid(), role, text, modo, t: Date.now() }).catch(e => Log.add("salvar msg", e));
@@ -1950,10 +2116,38 @@ $("#bSend").onclick = send;
 $("#in").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && innerWidth > 700) { e.preventDefault(); send(); } });
 $("#in").addEventListener("input", e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px"; });
 $("#bMic").onclick = () => {
-  if (Voice.active()) return Voice.cancel();
+  if (Voice.active()) {
+    // Para de ouvir, deixa o texto no campo para editar/enviar manualmente
+    Voice.stop();
+    $("#dot").className = "dot";
+    setSt("Pronta");
+    const ta = $("#in");
+    ta.style.height = "auto";
+    ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
+    ta.focus();
+    return;
+  }
   $("#dot").className = "dot on";
-  setSt("● Ouvindo… (toque no microfone para cancelar)");
-  Voice.listen(t => $("#in").value = t, f => { $("#dot").className = "dot"; setSt("Pronta"); if (f) send(); });
+  setSt("● Ouvindo… (toque de novo no microfone para parar)");
+  Voice.listen(
+    t => {
+      $("#in").value = t;
+      const ta = $("#in");
+      ta.style.height = "auto";
+      ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
+    },
+    finalText => {
+      $("#dot").className = "dot";
+      setSt("Pronta");
+      if (finalText) {
+        $("#in").value = finalText;
+        const ta = $("#in");
+        ta.style.height = "auto";
+        ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
+      }
+      // NÃO envia automaticamente — usuário revisa e aperta Enviar
+    }
+  );
 };
 $("#bAtt").onclick = () => {
   if (modo !== "treino") { switchMode("treino"); sys("Arquivos são ensinados no Modo Treinamento."); }
