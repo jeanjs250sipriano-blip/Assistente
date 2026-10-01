@@ -161,7 +161,7 @@ const Cfg = {
     geminiKey: "",
     geminiLimit: 40,
     geminiEnabled: false,
-    geminiModel: "gemini-3.8-flash"
+    geminiModel: "gemini-3.5-flash-lite"
   },
   async load() {
     const all = await DB.all("settings");
@@ -170,7 +170,10 @@ const Cfg = {
     if (this.v.nome === "Aurora") this.v.nome = "Rafinha";
     if (this.v.geminiLimit == null) this.v.geminiLimit = 40;
     if (this.v.geminiEnabled == null) this.v.geminiEnabled = false;
-    if (!this.v.geminiModel || this.v.geminiModel === "gemini-2.0-flash") this.v.geminiModel = "gemini-3.8-flash";
+    // migra modelos antigos/descontinuados ou sobrecarregados
+    if (!this.v.geminiModel || /gemini-2\.0-flash|gemini-3\.8-flash$/.test(this.v.geminiModel)) {
+      this.v.geminiModel = "gemini-3.5-flash-lite";
+    }
   },
   save() { return DB.put("settings", this.v); }
 };
@@ -560,7 +563,7 @@ const AIProvider = {
     if (!(await this.canUseGemini())) return null;
     const key = Cfg.v.geminiKey.trim();
     if (!key) return null;
-    const model = Cfg.v.geminiModel || "gemini-3.8-flash";
+    const model = Cfg.v.geminiModel || "gemini-3.5-flash-lite";
     const nome = Cfg.v.nome || "Rafinha";
     const formal = Cfg.v.formal === "formal" ? "formal e educada" : "informal, amigável e natural";
     const tamanho = Cfg.v.tamanho === "detalhadas" ? "respostas um pouco mais detalhadas" : "respostas curtas e diretas";
@@ -1715,6 +1718,16 @@ async function tCf() {
 <input id="cGemKey" type="password" placeholder="AIza... ou AQ...." value="${esc(c.geminiKey || "")}" autocomplete="off">
 </label>
 
+<label>Modelo
+<select id="cGemModel">
+  <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (recomendado, menos fila)</option>
+  <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
+  <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
+  <option value="gemini-3.8-flash">gemini-3.8-flash (mais inteligente, pode ter fila)</option>
+  <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+</select>
+</label>
+
 <label>Limite diário de chamadas
 <input id="cGemLim" type="number" min="1" max="500" value="${lim}">
 </label>
@@ -1735,6 +1748,7 @@ async function tCf() {
   $("#c2").value = c.formal;
   $("#c3").value = c.tamanho;
   $("#c4").value = c.voz;
+  $("#cGemModel").value = c.geminiModel || "gemini-3.5-flash-lite";
 
   const saveAll = async () => {
     Object.assign(c, {
@@ -1747,6 +1761,7 @@ async function tCf() {
       dev: $("#c7").checked,
       geminiEnabled: $("#cGemOn").checked,
       geminiKey: $("#cGemKey").value.trim(),
+      geminiModel: $("#cGemModel").value || "gemini-3.5-flash-lite",
       geminiLimit: Math.max(1, parseInt($("#cGemLim").value, 10) || 40)
     });
     await Cfg.save();
