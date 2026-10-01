@@ -256,7 +256,7 @@ const Context = {
   pendenteRef: null,
   push(role, text) {
     this.recent.push({ role, text, t: Date.now() });
-    if (this.recent.length > 16) this.recent.shift();
+    if (this.recent.length > 24) this.recent.shift();
   },
   prevUser() {
     const u = this.recent.filter(x => x.role === "u");
@@ -569,23 +569,41 @@ const AIProvider = {
     const tamanho = Cfg.v.tamanho === "detalhadas" ? "respostas um pouco mais detalhadas" : "respostas curtas e diretas";
     const instr = (Cfg.v.instr || "").trim();
 
+    // Memória permanente relevante
     let memCtx = "";
     try {
-      const hits = await Retrieve.find(userText, 4);
-      if (hits.length) memCtx = "\n\nInformações que você já sabe (use se forem relevantes):\n" + hits.map(fmt).join("\n");
+      const hits = await Retrieve.find(userText, 5);
+      if (hits.length) memCtx = "Informações permanentes que você já sabe (use se forem relevantes):\n" + hits.map(fmt).join("\n");
     } catch (e) {}
 
-    const system = `Você é ${nome}, uma assistente pessoal inteligente que fala português brasileiro.
+    // Histórico recente da conversa (memória de curto prazo)
+    const hist = (Context.recent || []).slice(-12);
+    const historyLines = hist.map(m => (m.role === "u" ? "Usuário" : nome) + ": " + m.text).join("\n");
+
+    const systemText = `Você é ${nome}, uma assistente pessoal inteligente que fala português brasileiro.
 Personalidade: ${formal}. Prefira ${tamanho}.
 ${instr ? "Instruções do usuário: " + instr + "\n" : ""}
 Regras importantes:
-- Você é a Rafinha. Não diga que é o Gemini ou o Google.
-- Use as informações de memória/conhecimento fornecidas quando forem relevantes.
+- Você é a Rafinha. Nunca diga que é o Gemini, o Google ou um modelo de IA.
+- Use o histórico da conversa abaixo para entender o contexto completo (referências como "isso", "ele", respostas curtas ao que você perguntou, etc.).
+- Use as informações permanentes de memória quando forem relevantes.
+- Se o usuário responder só com um nome ou dado curto depois que você perguntou algo, interprete como resposta à sua pergunta.
 - Se não souber algo com certeza, diga honestamente.
 - Nunca invente memórias pessoais do usuário.
 - Responda de forma natural, como uma conversa real.`;
 
-    const prompt = system + memCtx + (extraContext ? "\n\n" + extraContext : "") + "\n\nMensagem do usuário: " + userText;
+    // Monta contents multi-turno para o Gemini entender o diálogo inteiro
+    const contents = [];
+    // Primeiro bloco: sistema + memória + histórico resumido (como contexto)
+    let preamble = systemText;
+    if (memCtx) preamble += "\n\n" + memCtx;
+    if (historyLines) preamble += "\n\nHistórico recente da conversa:\n" + historyLines;
+    if (extraContext) preamble += "\n\n" + extraContext;
+    preamble += "\n\nResponda à última mensagem do usuário de forma coerente com todo o contexto acima.";
+
+    contents.push({ role: "user", parts: [{ text: preamble }] });
+    contents.push({ role: "model", parts: [{ text: "Entendido. Vou continuar a conversa usando o histórico e a memória." }] });
+    contents.push({ role: "user", parts: [{ text: userText }] });
 
     try {
       setSt("Pensando…");
@@ -598,7 +616,7 @@ Regras importantes:
           "x-goog-api-key": key
         },
         body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          contents,
           generationConfig: {
             temperature: 0.7,
             maxOutputTokens: Cfg.v.tamanho === "detalhadas" ? 1024 : 512
@@ -1134,7 +1152,11 @@ const ReasoningEngine = {
       return P("Você ainda não me disse o seu nome.", { faltando: true });
     }
     if (/\b(seu|sua) nome\b|voce se chama|quem e voce/.test(n)) { Context.attrFoco = { attr: "nome", n: Sess.n }; return P("Meu nome é " + await Identity.getAssistantName() + "."); }
-    if (/voce sabe quem eu sou|quem sou eu/.test(n)) { const u = await Identity.getUserName(); return P(u ? "Você é " + u + "." : "Ainda não sei quem você é. Se quiser, me diga seu nome.", { faltando: !u }); }
+    if (/voce sabe quem eu sou|quem sou eu/.test(n)) {
+      const u = await Identity.getUserName();
+      if (!u) Context.attrFoco = { attr: "nome", n: Sess.n };
+      return P(u ? "Você é " + u + "." : "Ainda não sei quem você é. Se quiser, me diga seu nome.", { faltando: !u });
+    }
     if (m = n.match(/^(?:quanto (?:e|da)|calcule)\s+(.+)$/)) { const ex = this.expr(m[1]); if (ex) { try { const r = Tools.run("calculadora", ex); return P(ex.replace(/\*/g, "×").replace(/\//g, "÷") + " = " + (+r.toFixed(10)) + ".", { ferramenta: "calculadora" }); } catch { return P("Não consegui calcular essa expressão.", { conf: 0.3 }); } } }
     if (/mais (velh|nov)/.test(n)) return this.compare(n);
     if (m = n.match(/^qual (?:e )?o nome (d[ao]s?) (.+)$/)) {
@@ -1252,10 +1274,24 @@ const Mind = {
   },
   async run(text, r) {
     text = text.replace(/^Entendi:\s*/i, "");
-    const el = text.match(/^(?:o|a)\s+(?:meu|minha)\s+(?:nome\s+)?(?:é|e)\s+(.+?)[.!]?$/i);   // resposta elíptica: "O meu é Jean"
-    if (el && Context.attrFoco && Context.attrFoco.attr === "nome" && Sess.n - Context.attrFoco.n <= 3) {
+    // Resposta elíptica completa: "O meu é Jean" / "Meu nome é Jean"
+    const el = text.match(/^(?:o|a)\s+(?:meu|minha)\s+(?:nome\s+)?(?:é|e)\s+(.+?)[.!]?$/i) ||
+               text.match(/^(?:meu nome (?:é|e)|me chamo)\s+(.+?)[.!]?$/i);
+    if (el && Context.attrFoco && Context.attrFoco.attr === "nome" && Sess.n - Context.attrFoco.n <= 5) {
       const v = el[1].trim(); EntityManager.addFact(EntityManager.user, "nome", v, {});
       DecisionEngine.run([P("Entendi: seu nome é " + v + ".", { items: [{ camada: "usuario", categoria: "pessoal", chave: "nome", valor: v, ent: "__usuario__", attr: "nome", importancia: 9 }] })]); return true;
+    }
+    // Resposta só com o nome: "Jean" / "Sou o Jean" logo após ela ter pedido o nome
+    if (Context.attrFoco && Context.attrFoco.attr === "nome" && Sess.n - Context.attrFoco.n <= 5) {
+      const bare = text.replace(/[.!?]+$/, "").trim();
+      const mName = bare.match(/^(?:(?:eu\s+)?(?:sou\s+(?:o|a)\s+)?|me\s+chamo\s+)?([A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][a-záàâãéêíóôõúç]+(?:\s+[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][a-záàâãéêíóôõúç]+){0,2})$/);
+      if (mName && bare.length <= 40 && !/^(sim|nao|ok|claro|obrigad)/i.test(bare)) {
+        const v = mName[1].trim();
+        EntityManager.addFact(EntityManager.user, "nome", v, {});
+        Context.attrFoco = null;
+        DecisionEngine.run([P("Entendi: seu nome é " + v + ".", { items: [{ camada: "usuario", categoria: "pessoal", chave: "nome", valor: v, ent: "__usuario__", attr: "nome", importancia: 9 }] })]);
+        return true;
+      }
     }
     const rc = text.match(/^(?:mas\s+)?(?:eu\s+)?(?:j[áa]\s+)?(?:te\s+)?(?:disse|falei)\s+(?:isso\s+)?(?:que\s+)?(.+)$/i);   // "Mas disse que sou de 1992"
     if (rc) {
@@ -1371,7 +1407,12 @@ const Act = {
       Context.addEntity(best.valor);
       if (best.chave === "nome") Context.ultimaPessoa = best.valor;
     } else {
-      say("Não tenho essa informação guardada. Quer me ensinar?");
+      if (k === "nome" || /nome/.test(k)) {
+        Context.attrFoco = { attr: "nome", n: Sess.n };
+        say("Ainda não sei quem você é. Se quiser, me diga seu nome.");
+      } else {
+        say("Não tenho essa informação guardada. Quer me ensinar?");
+      }
     }
   },
 
@@ -1435,9 +1476,11 @@ const Act = {
     }
 
     // Afirmações / conversa livre → tenta Gemini se ligado
-    if (await AIProvider.canUseGemini() && r.t.length >= 8) {
+    // Com Gemini ligado, mesmo respostas curtas usam o histórico da conversa
+    if (await AIProvider.canUseGemini() && r.t.trim().length >= 1) {
       const gem = await AIProvider.generateResponse(r.t);
       if (gem && gem.text) return say(gem.text);
+      if (gem && gem.error) Log.add("gemini conversar", gem.error);
     }
 
     const w = Worth.assess(r.t);
