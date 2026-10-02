@@ -750,6 +750,12 @@ const Voice = (() => {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   let rec = null;
   let listening = false; // modo contínuo: só para quando o usuário clicar de novo
+  // Buffer no nível do módulo → permite reset no send / clear do input
+  let fin = [];
+  let sessFin = [];
+  let interim = "";
+  let onTextCb = null;
+  let onStopCb = null;
   const ok = () => !!SR;
   const synOk = () => "speechSynthesis" in window;
 
@@ -763,16 +769,20 @@ const Voice = (() => {
     else list.push(t);
   };
   const compose = arr => { const out = []; arr.filter(Boolean).forEach(t => merge(out, t.trim())); return out.join(" ").replace(/\s+/g, " ").trim(); };
+  const all = () => compose([...fin, ...sessFin, interim]);
   /*ENDMERGE*/
 
   function listen(onText, onStop) {
     if (!SR) return sys("Este navegador não oferece suporte a reconhecimento de voz.");
     if (listening) return;
     listening = true;
+    onTextCb = onText;
+    onStopCb = onStop;
+    // Começa limpo se o input estiver vazio; senão usa o que já está digitado como prefixo
     const prefix = ($("#in").value || "").trim();
-    const fin = prefix ? [prefix] : [];   // trechos confirmados (de todas as sessões do reconhecedor)
-    let sessFin = [], interim = "";
-    const all = () => compose([...fin, ...sessFin, interim]);
+    fin = prefix ? [prefix] : [];
+    sessFin = [];
+    interim = "";
 
     const startRec = () => {
       if (!listening) return;
@@ -787,7 +797,7 @@ const Voice = (() => {
           const t = r[0].transcript.trim(); if (!t) continue;
           if (r.isFinal) merge(sessFin, t); else interim = t;
         }
-        onText(all());
+        if (onTextCb) onTextCb(all());
       };
       rec.onerror = e => {
         Log.add("voz erro", e.error);
@@ -797,21 +807,31 @@ const Voice = (() => {
         rec = null;
         [...sessFin, interim].filter(Boolean).forEach(t => merge(fin, t));   // não perde o que ainda era parcial
         sessFin = []; interim = "";
-        onText(all());
+        if (onTextCb) onTextCb(all());
         if (listening) {
           setTimeout(() => {
             if (!listening) return;
-            try { startRec(); } catch (err) { listening = false; onStop(all()); }
+            try { startRec(); } catch (err) { listening = false; if (onStopCb) onStopCb(all()); }
           }, 250);
-        } else onStop(all());
+        } else if (onStopCb) onStopCb(all());
       };
-      try { rec.start(); } catch (e) { listening = false; sys("Não foi possível iniciar o microfone."); onStop(all()); }
+      try { rec.start(); } catch (e) { listening = false; sys("Não foi possível iniciar o microfone."); if (onStopCb) onStopCb(all()); }
     };
     startRec();
   }
 
+  /** Zera o buffer de transcrição */
+  const resetBuffer = () => {
+    fin = [];
+    sessFin = [];
+    interim = "";
+  };
+
   const cancel = () => {
     listening = false;
+    onTextCb = null;
+    onStopCb = null;
+    resetBuffer();
     if (rec) {
       try { rec.abort(); } catch (e) {}
       rec = null;
@@ -829,6 +849,21 @@ const Voice = (() => {
       }
     }
   };
+
+  /** Para o mic e zera o buffer — chamado no envio da mensagem */
+  const stopAndClear = () => {
+    listening = false;
+    onTextCb = null;
+    onStopCb = null;
+    resetBuffer();
+    if (rec) {
+      try { rec.abort(); } catch (e) {}
+      rec = null;
+    }
+    setSt("Pronta");
+    $("#dot").className = "dot";
+  };
+
   function speak(t) {
     if (!synOk()) return sys("Este navegador não oferece síntese de voz.");
     speechSynthesis.cancel();
@@ -842,11 +877,11 @@ const Voice = (() => {
     speechSynthesis.speak(u);
   }
   function pick() {
-    const all = speechSynthesis.getVoices();
-    const sel = all.find(v => v.name === Cfg.v.voz);
+    const allV = speechSynthesis.getVoices();
+    const sel = allV.find(v => v.name === Cfg.v.voz);
     if (sel) return sel;
-    let pt = all.filter(v => /^pt[-_]BR/i.test(v.lang));
-    if (!pt.length) pt = all.filter(v => /^pt/i.test(v.lang));
+    let pt = allV.filter(v => /^pt[-_]BR/i.test(v.lang));
+    if (!pt.length) pt = allV.filter(v => /^pt/i.test(v.lang));
     const sc = v => {
       const n = v.name.toLowerCase();
       let x = 0;
@@ -864,6 +899,8 @@ const Voice = (() => {
     listen,
     cancel,
     stop,
+    stopAndClear,
+    resetBuffer,
     speak,
     pick,
     active: () => listening || !!rec,
@@ -1665,8 +1702,9 @@ const Act = {
   async conversar(r) {
     if (r.aviso) return say(r.aviso);
 
-    // No modo treino, afirmações longas → aprendizado
-    if (r.tipo === "afirmacao" && ((modo === "treino" && r.t.length >= 25) || r.t.length >= 200))
+    // Só aprende texto longo automaticamente no Modo Treinamento.
+    // No chat, aprendizado só com comando explícito no início da frase.
+    if (r.tipo === "afirmacao" && modo === "treino" && r.t.length >= 25)
       return learnText(r.t);
 
     // Resolver referências e buscar contexto
@@ -1749,12 +1787,17 @@ async function doConfirm(p) {
 
 const SYS = new Set("ajuda backup painel modo aprender_texto esquecer memorizar ensinar buscar_doc listar_docs mostrar capacidade saudacao despedida consultar_assunto".split(" "));
 const VERBO_SALVAR = /\b(anot[ae]r?|guard[ae]r?|memoriz[ae]r?|grav[ae]r?|registr[ae]r?|salv[ae]r?|escrev[ae]r?|lembr[ae](?:-se)?|adicion[ae]r?|colo(?:ca|que|car)|bota(?:r)?|n[aã]o esque[cç]a)\b/i;
-function explicito(t) {   // "anota aí que eu sou o Jean", "guarda isso na sua memória: …", "escreva no seu banco de dados que…"
+function explicito(t) {   // Só aceita comando de salvar se o verbo estiver no COMEÇO da frase
+  // Exemplos válidos: "Salva isso: …", "Anota que eu sou o Jean", "Guarde na memória que…"
+  // Exemplos inválidos: "Eu tava falando e você perguntava pra salvar" (verbo no meio)
   t = t.trim();
   if (/\?\s*$/.test(t) || /^(voc[eê]|vc)\b/i.test(t)) return null;
-  const m = t.match(VERBO_SALVAR);
-  if (!m || m.index > 40) return null;
-  const resto = t.slice(m.index + m[0].length);
+  // Remove interjeições comuns do início para achar o verbo de comando
+  const limpo = t.replace(/^(por favor|pfv|pf|oi|olá|ei|e aí|eai)[,!\s]+/i, "").trim();
+  const m = limpo.match(VERBO_SALVAR);
+  // Verbo precisa estar nos primeiros ~25 caracteres (começo real da ordem)
+  if (!m || m.index > 25) return null;
+  const resto = limpo.slice(m.index + m[0].length);
   if (!/(isso|isto|a[ií]\b|mem[oó]ria|banco de dados|cadastro|\bque\b|:)/i.test(resto.slice(0, 70))) return null;
   const alvo = /^\s*[,:]?\s*(?:isso|isto|essa informa[cç][aã]o|esta informa[cç][aã]o|a[ií])?\s*(?:(?:na|em|no|para a|pra)\s+(?:sua|seu)\s+(?:mem[oó]ria|banco de dados|cadastro)(?:\s+de dados)?)?\s*(?:que\b|:|,)?\s*/i;
   return { conteudo: resto.replace(alvo, "").trim() };
@@ -2140,11 +2183,21 @@ function send() {
   const t = $("#in").value;
   $("#in").value = "";
   $("#in").style.height = "auto";
+  // Para o mic e zera o buffer — evita o texto antigo voltar no input
+  if (Voice.active()) Voice.stopAndClear();
   handle(t);
 }
 $("#bSend").onclick = send;
 $("#in").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && innerWidth > 700) { e.preventDefault(); send(); } });
-$("#in").addEventListener("input", e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px"; });
+$("#in").addEventListener("input", e => {
+  e.target.style.height = "auto";
+  e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
+  // Se o usuário apagou tudo enquanto o mic está ativo, zera o buffer
+  // para o próximo trecho de voz não ressuscitar o texto antigo
+  if (Voice.active() && !(e.target.value || "").trim()) {
+    Voice.resetBuffer();
+  }
+});
 $("#bMic").onclick = () => {
   if (Voice.active()) {
     // Para de ouvir, deixa o texto no campo para editar/enviar manualmente
