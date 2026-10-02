@@ -753,19 +753,26 @@ const Voice = (() => {
   const ok = () => !!SR;
   const synOk = () => "speechSynthesis" in window;
 
+  /*MERGE*/
+  // No Android cada resultado "final" repete a frase inteira até ali: funde em vez de somar
+  const merge = (list, t) => {
+    const L = list[list.length - 1], a = norm(t), b = L ? norm(L) : "";
+    if (!L) list.push(t);
+    else if (a.startsWith(b)) list[list.length - 1] = t;      // t estende o trecho anterior
+    else if (b.startsWith(a) || b.endsWith(a)) { /* repetição menor: ignora */ }
+    else list.push(t);
+  };
+  const compose = arr => { const out = []; arr.filter(Boolean).forEach(t => merge(out, t.trim())); return out.join(" ").replace(/\s+/g, " ").trim(); };
+  /*ENDMERGE*/
+
   function listen(onText, onStop) {
     if (!SR) return sys("Este navegador não oferece suporte a reconhecimento de voz.");
     if (listening) return;
     listening = true;
-
-    // Texto que já estava no campo (se o usuário digitou algo antes)
     const prefix = ($("#in").value || "").trim();
-    let committed = prefix ? prefix + " " : ""; // só resultados finais confirmados
-    let interim = "";
-
-    const emit = () => {
-      onText((committed + interim).replace(/\s+/g, " ").trim());
-    };
+    const fin = prefix ? [prefix] : [];   // trechos confirmados (de todas as sessões do reconhecedor)
+    let sessFin = [], interim = "";
+    const all = () => compose([...fin, ...sessFin, interim]);
 
     const startRec = () => {
       if (!listening) return;
@@ -773,60 +780,33 @@ const Voice = (() => {
       rec.lang = "pt-BR";
       rec.continuous = true;
       rec.interimResults = true;
-
-      rec.onresult = e => {
-        interim = "";
-        // resultIndex = apenas resultados NOVOS (evita repetição)
-        for (let i = e.resultIndex; i < e.results.length; i++) {
-          const piece = e.results[i][0].transcript;
-          if (e.results[i].isFinal) {
-            committed += piece;
-            if (committed && !/\s$/.test(committed)) committed += " ";
-            interim = "";
-          } else {
-            interim += piece;
-          }
+      sessFin = []; interim = "";
+      rec.onresult = e => {   // reconstrói a sessão inteira a cada evento (não acumula por índice)
+        sessFin = []; interim = "";
+        for (const r of Array.from(e.results)) {
+          const t = r[0].transcript.trim(); if (!t) continue;
+          if (r.isFinal) merge(sessFin, t); else interim = t;
         }
-        emit();
+        onText(all());
       };
-
       rec.onerror = e => {
         Log.add("voz erro", e.error);
-        if (e.error === "not-allowed") {
-          listening = false;
-          sys("Não foi possível acessar o microfone (permissão negada).");
-          onStop(committed.trim());
-        }
-        // no-speech / aborted: ignora — onend reinicia se necessário
+        if (e.error === "not-allowed") { listening = false; sys("Não foi possível acessar o microfone (permissão negada)."); }
       };
-
       rec.onend = () => {
         rec = null;
-        interim = "";
-        emit();
+        [...sessFin, interim].filter(Boolean).forEach(t => merge(fin, t));   // não perde o que ainda era parcial
+        sessFin = []; interim = "";
+        onText(all());
         if (listening) {
-          // Reinicia após pausa natural (permite continuar falando)
           setTimeout(() => {
             if (!listening) return;
-            try { startRec(); } catch (err) {
-              listening = false;
-              onStop(committed.trim());
-            }
-          }, 300);
-        } else {
-          onStop(committed.trim());
-        }
+            try { startRec(); } catch (err) { listening = false; onStop(all()); }
+          }, 250);
+        } else onStop(all());
       };
-
-      try {
-        rec.start();
-      } catch (e) {
-        listening = false;
-        sys("Não foi possível iniciar o microfone.");
-        onStop(committed.trim());
-      }
+      try { rec.start(); } catch (e) { listening = false; sys("Não foi possível iniciar o microfone."); onStop(all()); }
     };
-
     startRec();
   }
 
@@ -1277,7 +1257,7 @@ const PRED = [
   [/^(?:adora|adoro|ama|amo)\s+(.+)$/i, "gosto"],
   [/^(?:quer|quero|querem)\s+(.+)$/i, "desejo"],
   [/^(?:é|foi|sou)\s+(filh[oa]|pai|m[ãa]e|irm[ãa]o|irm[ãa]|marido|esposa|amig[oa]|prim[oa]|tio|tia)\s+d[eoa]s?\s+(.+)$/i, "relacao"],
-  [/^(?:sou)\s+(?:um\s+|uma\s+)?(.+)$/i, "ocupacao"],
+  [/^(?:sou)\s+(?:um\s+|uma\s+|o\s+|a\s+)?(.+)$/i, "ocupacao"],
   [/^(?:est[áa]|estou|estava)\s+(.+)$/i, "estado"]
 ];
 const Interpreter = {
@@ -1491,7 +1471,11 @@ const DecisionEngine = {
     const acks = plans.flatMap(p => p.ack || []), items = plans.flatMap(p => p.items || []);
     let txt = plans.filter(p => !p.ack && p.texto).map(p => p.texto).join(" ");
     if (acks.length) { const a = acks.length > 1 ? "Entendi:\n• " + acks.map(cap).join("\n• ") : "Entendi: " + (/^(Sua|Seu|Você)\b/.test(acks[0]) ? acks[0][0].toLowerCase() + acks[0].slice(1) : acks[0]) + "."; txt = txt ? txt + "\n" + a : a; }
-    if (items.length) { Context.candidatos = items; Context.candN = Sess.n; pending = { k: "mem", items, o: "conversa" }; return say(txt + "\nQuer que eu memorize isso?"); }
+    if (items.length) {
+      Context.candidatos = items; Context.candN = Sess.n;
+      if (modo === "chat") return say(txt + dica());   // conversa normal: não interrompe com pergunta
+      pending = { k: "mem", items, o: "conversa" }; return say(txt + "\nQuer que eu memorize isso?");
+    }
     say(txt);
   }
 };
@@ -1542,6 +1526,7 @@ const Mind = {
     if (!plans.some(p => p.acao !== "NADA")) return false;
     const ok = plans.filter(p => p.acao !== "NADA");
     if (plans.length > ok.length) ok.push(P("Sobre o resto, não consegui entender com segurança."));
+    if (modo === "chat" && ok.every(p => p.ack) && !ok.some(p => p.estado) && await AIProvider.canUseGemini()) return false;   // os fatos já estão no contexto; o Gemini conversa
     DecisionEngine.run(ok); return true;
   }
 };
@@ -1606,7 +1591,10 @@ const Act = {
     ask({ k: "mem", items: r.items, o: modo === "treino" ? "treinamento" : "conversa" },
       (pre || "Entendi: ") + (r.items.length > 1 ? "\n• " + r.items.map(desc).join("\n• ") + "\n" : r.items.map(desc).join("; ") + ". ") + "Deseja que eu memorize isso?");
   },
-  async informar(r) { return Act.memorizar(r, "Percebi uma informação: "); },
+  async informar(r) {
+    if (modo === "chat") { Context.candidatos = r.items; Context.candN = Sess.n; return say("Entendi: " + r.items.map(desc).join("; ") + "." + dica()); }
+    return Act.memorizar(r, "Percebi uma informação: ");
+  },
 
   async esquecer(r) {
     const h = (await Retrieve.find(r.assunto, 3)).filter(x => x.src !== "documento");
@@ -1686,7 +1674,7 @@ const Act = {
     const query = ref.topic ? (r.t + " " + ref.topic) : r.t;
     const h = (r.tipo === "pergunta" || r.ref) ? await Retrieve.find(query, 3) : [];
 
-    if (h.length) {
+    if (h.length && !(modo === "chat" && await AIProvider.canUseGemini() && !/\b(o que voc[eê] (sabe|lembra)|lembra|guardou|mem[oó]ria)\b/i.test(r.t))) {
       Context.setTopic(ref.topic || Context.topico);
       return say("Isto é o que tenho guardado:\n\n" + h.map(fmt).join("\n"));
     }
@@ -1717,11 +1705,11 @@ const Act = {
     }
 
     const w = Worth.assess(r.t);
-    if (w.classe === "informacao") { Context.candidatos = [w.item]; Context.candN = Sess.n; return ask({ k: "mem", items: [w.item], o: "conversa" }, "Isso parece uma informação sobre você: “" + w.item.valor.slice(0, 140) + "”. Quer que eu guarde como nota?"); }
+    if (w.classe === "informacao") { Context.candidatos = [w.item]; Context.candN = Sess.n; if (modo === "chat") return say("Entendi." + dica()); pending = { k: "mem", items: [w.item], o: "conversa" }; return say("Isso parece uma informação sobre você: “" + w.item.valor.slice(0, 140) + "”. Quer que eu guarde como nota?"); }
     if (w.classe === "estado") return say("Entendi.");
     if (w.classe === "opiniao") return say("Entendi, é a sua opinião.");
     if (w.classe === "social") return say("Certo.");
-    say("Não tenho certeza do que fazer com isso. É algo para eu guardar ou é só conversa? Se for para guardar, diga “guarde que…” com a informação.");
+    say("Entendi." + dica());
   }
 };
 
@@ -1760,6 +1748,31 @@ async function doConfirm(p) {
 }
 
 const SYS = new Set("ajuda backup painel modo aprender_texto esquecer memorizar ensinar buscar_doc listar_docs mostrar capacidade saudacao despedida consultar_assunto".split(" "));
+const VERBO_SALVAR = /\b(anot[ae]r?|guard[ae]r?|memoriz[ae]r?|grav[ae]r?|registr[ae]r?|salv[ae]r?|escrev[ae]r?|lembr[ae](?:-se)?|adicion[ae]r?|colo(?:ca|que|car)|bota(?:r)?|n[aã]o esque[cç]a)\b/i;
+function explicito(t) {   // "anota aí que eu sou o Jean", "guarda isso na sua memória: …", "escreva no seu banco de dados que…"
+  t = t.trim();
+  if (/\?\s*$/.test(t) || /^(voc[eê]|vc)\b/i.test(t)) return null;
+  const m = t.match(VERBO_SALVAR);
+  if (!m || m.index > 40) return null;
+  const resto = t.slice(m.index + m[0].length);
+  if (!/(isso|isto|a[ií]\b|mem[oó]ria|banco de dados|cadastro|\bque\b|:)/i.test(resto.slice(0, 70))) return null;
+  const alvo = /^\s*[,:]?\s*(?:isso|isto|essa informa[cç][aã]o|esta informa[cç][aã]o|a[ií])?\s*(?:(?:na|em|no|para a|pra)\s+(?:sua|seu)\s+(?:mem[oó]ria|banco de dados|cadastro)(?:\s+de dados)?)?\s*(?:que\b|:|,)?\s*/i;
+  return { conteudo: resto.replace(alvo, "").trim() };
+}
+const dica = () => Context.dicaMem ? "" : (Context.dicaMem = true, "\n(Isso fica só na conversa. Para eu guardar de vez, diga “anota isso”.)");
+async function salvarExplicito(txt) {
+  const nseg = txt.split(/\n+|(?<=[.!?])\s+/).filter(x => x.trim()).length;
+  const pessoal = (txt.match(/\b(eu|meu|minha|meus|minhas|moro|nasci|sou|tenho|trabalho|gosto)\b/gi) || []).length;
+  if (nseg >= 4 && pessoal < nseg / 3) {   // texto informativo → conhecimento
+    const a = analyze(txt), rec = knRec(a, "comando na conversa", hash(txt));
+    rec.trechos = txt.match(/[\s\S]{1,900}(?:\s|$)/g) || [txt];
+    await DB.put("knowledge", rec); Sess.saved++;
+    return say("Anotado no conhecimento: “" + rec.assunto + "”.");
+  }
+  let items = await Mind.extract(txt);
+  if (!items.length) items = [Worth.assess(txt).item || { camada: "usuario", categoria: "nota", chave: (kw(txt, 2).join(" ") || "nota") + " (nota)", valor: txt, importancia: 6 }];
+  return await doConfirm({ k: "mem", items, o: "conversa" });
+}
 async function handle(text) {
   text = text.trim();
   if (!text) return;
@@ -1794,6 +1807,12 @@ async function handle(text) {
     }
     if (yes && Context.candidatos && Sess.n - Context.candN <= 4) return await doConfirm({ k: "mem", items: Context.candidatos, o: "conversa" });   // "Disse sim!" / "Memorize isso" depois de a pergunta ter passado
     if (no && Context.candidatos) { Context.candidatos = null; return say("Tudo bem, não salvei."); }
+    const ex = explicito(text);
+    if (ex && modo === "chat") {   // só guarda quando o usuário manda; sem perguntar "quer que eu anote?"
+      const txt = (ex.conteudo || Context.prevUser() || "").replace(/^Entendi:\s*/i, "").trim();
+      if (!txt) return say("O que devo anotar? Diga, por exemplo: “anota que eu sou o Jean”.");
+      return await salvarExplicito(txt);
+    }
     if (/^\W*(sim|claro)\W*$/i.test(text)) return say("Sim para quê? Não tenho nada aguardando sua confirmação.");
     if (/^\W*(guarde|memorize|grave|anote)(\s+(isso|isto|essa informa[cç][aã]o|esta informa[cç][aã]o))?\W*$/i.test(text)) {   // "memorize isso" → reinterpreta a fala anterior
       const prev = (Context.prevUser() || "").replace(/^Entendi:\s*/i, "").trim();
