@@ -23,6 +23,13 @@ button.pri{background:var(--ac);color:#fff;border-color:var(--ac)}
 .m.a{align-self:flex-start;background:var(--a);border-bottom-left-radius:4px}
 .m.s{align-self:center;font-size:13px;color:var(--mut);background:none;border-style:dashed}
 .m .sp{display:block;margin-top:6px;font-size:12px;color:var(--mut);cursor:pointer}
+.m .media{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.m .media img{
+  max-width:min(220px,70vw);max-height:180px;border-radius:12px;
+  object-fit:cover;border:1px solid var(--bd);cursor:pointer;
+}
+.m.u .media img{border-color:rgba(255,255,255,.25)}
+#interactChat .m .media img{border-color:rgba(255,255,255,.2);box-shadow:0 2px 8px rgba(0,0,0,.35)}
 @keyframes msgIn{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
 /* indicador digitando */
 .m.typing{align-self:flex-start;background:var(--a);border-bottom-left-radius:4px;min-width:52px}
@@ -460,6 +467,7 @@ const Cfg = {
     geminiLimit: 40,
     geminiEnabled: false,
     geminiModel: "gemini-3.5-flash-lite",
+    geminiLiveModel: "gemini-3.8-live",
     personalidadeEnvolvente: false,
     personalidadeSemFiltro: false
   },
@@ -856,8 +864,8 @@ const AIProvider = {
     const left = await GeminiUsage.remaining();
     return left > 0;
   },
-  /** Resposta exclusiva via Gemini. Não existe mais fallback de IA local. */
-  async generateResponse(userText, extraContext) {
+  /** Resposta exclusiva via Gemini. imageParts = [{inlineData:{mimeType,data}}] opcional. */
+  async generateResponse(userText, extraContext, imageParts) {
     if (!Cfg.v.geminiEnabled || !Cfg.v.geminiKey) {
       return { error: "Gemini está desligado. Vá em ☰ → Config, cole a chave da API e ligue o botão “Usar Gemini”." };
     }
@@ -952,12 +960,20 @@ ${instrExtra ? "\nInstruções extras do usuário: " + instrExtra : ""}`
       });
     }
 
-    // Mensagem atual do usuário
-    contents.push({ role: "user", parts: [{ text: userText }] });
+    // Mensagem atual do usuário (+ imagens multimodais, se houver)
+    const imgs = Array.isArray(imageParts) ? imageParts.filter(p => p && p.inlineData && p.inlineData.data) : [];
+    const userParts = [];
+    for (const p of imgs) userParts.push(p);
+    const txt = (userText || "").trim() || (imgs.length
+      ? "Analise a(s) imagem(ns) anexada(s). Descreva o que vê e responda de forma útil e natural."
+      : "");
+    if (txt) userParts.push({ text: txt });
+    if (!userParts.length) userParts.push({ text: userText || "" });
+    contents.push({ role: "user", parts: userParts });
 
     // Garante que contents não fique vazio e comece com user
     if (!contents.length || contents[0].role !== "user") {
-      contents.unshift({ role: "user", parts: [{ text: userText }] });
+      contents.unshift({ role: "user", parts: userParts });
     }
 
     try {
@@ -1678,10 +1694,35 @@ function extractCodeBlocks(text) {
   return blocks;
 }
 
-function bubble(role, text, save = true) {
+/** mediaPreviews: [{dataUrl|url, name}] opcional — miniaturas no balão */
+function bubble(role, text, save = true, mediaPreviews) {
   const d = document.createElement("div");
   d.className = "m " + role;
-  d.textContent = text;
+  if (mediaPreviews && mediaPreviews.length) {
+    const media = document.createElement("div");
+    media.className = "media";
+    mediaPreviews.forEach(p => {
+      const srcUrl = p.dataUrl || p.url;
+      if (!srcUrl) return;
+      const img = document.createElement("img");
+      img.src = srcUrl;
+      img.alt = p.name || "imagem";
+      img.loading = "lazy";
+      img.onclick = () => {
+        try {
+          const w = window.open("");
+          if (w) { w.document.write('<img src="'+srcUrl+'" style="max-width:100%">'); w.document.close(); }
+        } catch (e) {}
+      };
+      media.appendChild(img);
+    });
+    d.appendChild(media);
+  }
+  if (text) {
+    const tx = document.createElement("div");
+    tx.textContent = text;
+    d.appendChild(tx);
+  }
 
   const actions = document.createElement("div");
   actions.className = "sp";
@@ -1714,15 +1755,18 @@ function bubble(role, text, save = true) {
   actions.appendChild(bCopy);
 
   if (role === "a") {
-    // Voz local (SpeechSynthesis) desativada — será substituída pela voz do Gemini
-    // const bSpeak = document.createElement("span");
-    // bSpeak.textContent = "🔊 ouvir";
-    // bSpeak.style.cursor = "pointer";
-    // bSpeak.onclick = () => Voice.speak(text);
-    // actions.appendChild(bSpeak);
+    const bSpeak = document.createElement("span");
+    bSpeak.textContent = "🔊 ouvir";
+    bSpeak.style.cursor = "pointer";
+    bSpeak.title = "Ouvir resposta";
+    bSpeak.onclick = () => {
+      if (!Voice.synOk || !Voice.synOk()) return sys("Este navegador não oferece síntese de voz.");
+      Voice.speak(text);
+    };
+    actions.appendChild(bSpeak);
 
     // Botões de download para blocos de código / HTML
-    const blocks = extractCodeBlocks(text);
+    const blocks = extractCodeBlocks(text || "");
     blocks.forEach((b, i) => {
       const btn = document.createElement("span");
       const name = "rafinha-" + (b.lang || "arquivo") + (blocks.length > 1 ? "-" + (i + 1) : "") + "." + b.ext;
@@ -1734,7 +1778,7 @@ function bubble(role, text, save = true) {
     });
 
     // Se não houver bloco, mas o texto for longo e parecer código/arquivo, oferece TXT
-    if (!blocks.length && text.length > 200 && (/function |const |let |class |import |<!|<div|<style|def |SELECT /i.test(text))) {
+    if (!blocks.length && text && text.length > 200 && (/function |const |let |class |import |<!|<div|<style|def |SELECT /i.test(text))) {
       const btn = document.createElement("span");
       btn.textContent = "⬇ TXT";
       btn.style.cursor = "pointer";
@@ -1756,8 +1800,7 @@ function say(t) {
   hideTyping();
   bubble("a", t);
   Context.push("a", t);
-  // Voz local desativada — a voz passará a ser do Gemini (Live / TTS futuro)
-  // if (Cfg.v.auto) Voice.speak(t);
+  if (Cfg.v.auto && Voice.synOk && Voice.synOk()) Voice.speak(t);
 }
 function showTyping() {
   hideTyping();
@@ -1966,19 +2009,10 @@ const Act = {
   async painel(r) { openSheet(r.painel); },
   async modo(r) { switchMode(r.modo); },
 
-  async saudacao() {
-    const nome = await Identity.getUserName();
-    const base = Cfg.v.formal === "formal" ? "Olá. Estou à disposição." : "Olá! Como posso ajudar?";
-    say(nome ? (Cfg.v.formal === "formal" ? "Olá, " + nome + ". Estou à disposição." : "Olá, " + nome + "! Como posso ajudar?") : base);
-  },
-  async despedida() {
-    say(Cfg.v.formal === "formal" ? "Até logo." : "Até mais! Foi bom conversar.");
-  },
-
-  async capacidade(r) {
-    const ans = Capabilities.answer(r.t || r.raw);
-    say(ans || "Sim. Tenho capacidades locais de interpretação, memória, aprendizado e voz (quando o navegador permite). Digite /ajuda para ver o que posso fazer.");
-  },
+  // Saudações, despedidas e perguntas de capacidade → SEMPRE Gemini (não há mais resposta local)
+  async saudacao(r) { return Act.conversar(r || { t: "Oi", tipo: "conversa" }); },
+  async despedida(r) { return Act.conversar(r || { t: "Tchau", tipo: "conversa" }); },
+  async capacidade(r) { return Act.conversar(r); },
 
   async estado(r) {
     const v = { estou: "Você está", "tô": "Você está", to: "Você está", "me sinto": "Você se sente", ando: "Você anda" }[r.verbo] || "Você";
@@ -2065,12 +2099,15 @@ const Act = {
     if (r.aviso) return say(r.aviso);
 
     // Modo Treinamento: texto longo ainda pode ser aprendido como conhecimento (com confirmação)
-    if (r.tipo === "afirmacao" && modo === "treino" && r.t && r.t.length >= 25)
+    // (não aplica quando há imagem multimodal)
+    const hasImg = Context._pendingImages && Context._pendingImages.length;
+    if (!hasImg && r.tipo === "afirmacao" && modo === "treino" && r.t && r.t.length >= 25)
       return learnText(r.t);
 
-    // TODAS as respostas de conversa vêm EXCLUSIVAMENTE do Gemini.
-    // Não existe mais geração local de respostas.
-    const gem = await AIProvider.generateResponse(r.t || r.raw || "");
+    // TODAS as respostas de conversa vêm EXCLUSIVAMENTE do Gemini (texto + imagens).
+    const imgs = Context._pendingImages || null;
+    Context._pendingImages = null;
+    const gem = await AIProvider.generateResponse(r.t || r.raw || "", null, imgs);
     if (gem && gem.text) return say(gem.text);
     if (gem && gem.error) return say(gem.error);
     return say("Não foi possível obter resposta do Gemini. Verifique a chave e a conexão.");
@@ -2111,7 +2148,7 @@ async function doConfirm(p) {
   }
 }
 
-const SYS = new Set("ajuda backup painel modo aprender_texto esquecer memorizar ensinar buscar_doc listar_docs mostrar capacidade saudacao despedida consultar_assunto".split(" "));
+const SYS = new Set("ajuda backup painel modo aprender_texto esquecer memorizar ensinar buscar_doc listar_docs mostrar consultar_identidade consultar_usuario consultar_assunto".split(" "));
 const VERBO_SALVAR = /\b(anot[ae]r?|guard[ae]r?|memoriz[ae]r?|grav[ae]r?|registr[ae]r?|salv[ae]r?|escrev[ae]r?|lembr[ae](?:-se)?|adicion[ae]r?|colo(?:ca|que|car)|bota(?:r)?|n[aã]o esque[cç]a)\b/i;
 function explicito(t) {   // Só aceita comando de salvar se o verbo estiver no COMEÇO da frase
   // Exemplos válidos: "Salva isso: …", "Anota que eu sou o Jean", "Guarde na memória que…"
@@ -2144,14 +2181,30 @@ async function salvarExplicito(txt) {
 }
 
 async function handle(text) {
-  text = text.trim();
-  if (!text) return;
-  bubble("u", text);
-  Context.push("u", text);
+  text = (text || "").trim();
+  const media = PendingMedia;
+  PendingMedia = null; // consome uma vez
+  if (!text && !(media && media.parts && media.parts.length)) return;
+
+  const displayText = text === "(imagem anexada)" ? "" : text;
+  const label = displayText || (media && media.previews && media.previews.length
+    ? ("🖼 " + media.previews.length + " imagem(ns)")
+    : text);
+  bubble("u", label, true, media && media.previews);
+  Context.push("u", displayText || "[imagem anexada]");
+  // Guarda parts na própria mensagem de contexto via flag temporária
+  if (media && media.parts && media.parts.length) {
+    Context._pendingImages = media.parts;
+  }
   Sess.n++;
   kw(text, 3).forEach(w => Sess.tok[w] = (Sess.tok[w] || 0) + 1);
 
   try {
+    // Com imagem multimodal: vai direto ao Gemini (não passa por comandos locais)
+    if (Context._pendingImages && Context._pendingImages.length) {
+      return await Act.conversar({ t: displayText || "Analise a imagem.", tipo: "conversa", raw: text });
+    }
+
     const words = text.trim().split(/\s+/).length;
     const yes = words <= 5 && /\b(sim|pode|confirmo|claro|com certeza|guarde|memorize|isso mesmo)\b/i.test(text) && !/\bn[aã]o\b/i.test(text);
     const no = words <= 5 && /^\W*(n[aã]o|cancela|deixa|esquece)\b/i.test(text);
@@ -2411,7 +2464,7 @@ async function tCf() {
 <input id="cGemKey" type="password" placeholder="AIza... ou AQ...." value="${esc(c.geminiKey || "")}" autocomplete="off">
 </label>
 
-<label>Modelo
+<label>Modelo (chat / texto / imagem)
 <select id="cGemModel">
   <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (recomendado, menos fila)</option>
   <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
@@ -2420,6 +2473,14 @@ async function tCf() {
   <option value="gemini-2.5-flash">gemini-2.5-flash</option>
 </select>
 </label>
+<label>Modelo Live (voz em tempo real)
+<select id="cGemLiveModel">
+  <option value="gemini-3.8-live">gemini-3.8-live</option>
+  <option value="gemini-2.5-flash-native-audio-preview-12-2025">gemini-2.5-flash-native-audio-preview</option>
+  <option value="gemini-2.0-flash-live-001">gemini-2.0-flash-live-001</option>
+</select>
+</label>
+<small style="display:block;margin-top:-6px;color:var(--mut)">O Live exige modelo com suporte a áudio nativo e quota na sua chave.</small>
 
 <label>Limite diário de chamadas
 <input id="cGemLim" type="number" min="1" max="500" value="${lim}">
@@ -2442,6 +2503,7 @@ async function tCf() {
   $("#c3").value = c.tamanho;
   $("#c4").value = c.voz;
   $("#cGemModel").value = c.geminiModel || "gemini-3.5-flash-lite";
+  if ($("#cGemLiveModel")) $("#cGemLiveModel").value = c.geminiLiveModel || "gemini-3.8-live";
 
   const saveAll = async () => {
     Object.assign(c, {
@@ -2457,6 +2519,7 @@ async function tCf() {
       personalidadeSemFiltro: $("#cGemHot").checked,
       geminiKey: $("#cGemKey").value.trim(),
       geminiModel: $("#cGemModel").value || "gemini-3.5-flash-lite",
+      geminiLiveModel: ($("#cGemLiveModel") && $("#cGemLiveModel").value) || "gemini-3.8-live",
       geminiLimit: Math.max(1, parseInt($("#cGemLim").value, 10) || 40)
     });
     await Cfg.save();
@@ -2533,30 +2596,42 @@ function applyCfg() {
 }
 
 /* ===== Eventos ===== */
-function send() {
+/** Mídia pendente para a próxima chamada ao Gemini: { parts, previews } */
+let PendingMedia = null;
+
+async function send() {
   const t = ($("#in").value || "").trim();
-  const hasAttach = Attach.items.length > 0;
+  const hasAttach = typeof Attach !== "undefined" && Attach.items.length > 0;
   if (!t && !hasAttach) return;
   $("#in").value = "";
   $("#in").style.height = "auto";
   closeAttachMenu();
-  // Anexos de imagem serão enviados ao Gemini no próximo passo multimodal.
-  // Por enquanto, se houver só imagem sem texto, avisa.
-  if (!t && hasAttach) {
-    const names = Attach.items.map(x => x.name).join(", ");
-    bubble("u", "📎 " + names);
-    sys("Anexos prontos. A integração multimodal (enviar imagem ao Gemini) vem no próximo passo. Por enquanto descreva o que deseja na mensagem.");
-    // Mantém os anexos para o próximo envio com texto
-    return;
-  }
-  // Anexos de imagem: prepara parts multimodais para o Gemini (próximo passo de integração)
+
+  PendingMedia = null;
   if (hasAttach) {
-    window.__pendingParts = Attach.toGeminiParts(); // Promise
-    Attach.clear();
-  } else {
-    window.__pendingParts = null;
+    try {
+      setSt("Preparando imagem…");
+      $("#dot").className = "dot busy";
+      const packed = await Attach.toGeminiParts();
+      PendingMedia = packed; // { parts, previews }
+      Attach.clear();
+    } catch (e) {
+      Log.add("attach", e);
+      sys("Não foi possível ler a imagem: " + (e.message || e));
+      setSt("Pronta");
+      $("#dot").className = "dot";
+      return;
+    }
+    setSt("Pronta");
+    $("#dot").className = "dot";
   }
-  handle(t);
+
+  // Só imagem, sem texto → ainda envia ao Gemini com prompt padrão
+  const msg = t || (PendingMedia && PendingMedia.parts.length
+    ? "(imagem anexada)"
+    : "");
+  if (!msg && !(PendingMedia && PendingMedia.parts.length)) return;
+  handle(msg);
 }
 $("#bSend").onclick = send;
 $("#in").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && innerWidth > 700) { e.preventDefault(); send(); } });
@@ -2569,6 +2644,362 @@ $("#in").addEventListener("input", e => {
     Voice.resetBuffer();
   }
 });
+
+/* ===== GeminiLive — áudio bidirecional via WebSocket (BidiGenerateContent) =====
+   Endpoint oficial:
+   wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=API_KEY
+   Áudio de entrada: PCM 16-bit LE, 16 kHz, mono
+   Áudio de saída:   tipicamente PCM 24 kHz
+*/
+const GeminiLive = (() => {
+  const WS_PATH = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+  const INPUT_RATE = 16000;
+  const OUTPUT_RATE = 24000;
+  // Modelos Live conhecidos (o usuário pode precisar de acesso/quota)
+  const LIVE_MODELS = [
+    "gemini-3.8-live",
+    "gemini-2.5-flash-native-audio-preview-12-2025",
+    "gemini-2.0-flash-live-001"
+  ];
+
+  let ws = null;
+  let active = false;
+  let setupDone = false;
+  let mediaStream = null;
+  let audioCtxIn = null;
+  let audioCtxOut = null;
+  let processor = null;
+  let sourceNode = null;
+  let nextPlayTime = 0;
+  let transcriptBuf = "";
+
+  function isActive() { return active; }
+
+  function b64FromPCM(int16) {
+    const u8 = new Uint8Array(int16.buffer, int16.byteOffset, int16.byteLength);
+    let s = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < u8.length; i += chunk) {
+      s += String.fromCharCode.apply(null, u8.subarray(i, Math.min(i + chunk, u8.length)));
+    }
+    return btoa(s);
+  }
+
+  function pcmFromB64(b64) {
+    const bin = atob(b64);
+    const buf = new ArrayBuffer(bin.length);
+    const u8 = new Uint8Array(buf);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    return new Int16Array(buf);
+  }
+
+  function floatTo16BitPCM(float32) {
+    const out = new Int16Array(float32.length);
+    for (let i = 0; i < float32.length; i++) {
+      let s = Math.max(-1, Math.min(1, float32[i]));
+      out[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    return out;
+  }
+
+  function downsample(buffer, fromRate, toRate) {
+    if (fromRate === toRate) return buffer;
+    const ratio = fromRate / toRate;
+    const newLen = Math.round(buffer.length / ratio);
+    const result = new Float32Array(newLen);
+    for (let i = 0; i < newLen; i++) {
+      const idx = i * ratio;
+      const i0 = Math.floor(idx);
+      const i1 = Math.min(i0 + 1, buffer.length - 1);
+      const frac = idx - i0;
+      result[i] = buffer[i0] * (1 - frac) + buffer[i1] * frac;
+    }
+    return result;
+  }
+
+  function playPCM16(int16, sampleRate) {
+    if (!audioCtxOut) {
+      audioCtxOut = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: sampleRate || OUTPUT_RATE });
+    }
+    const ctx = audioCtxOut;
+    if (ctx.state === "suspended") ctx.resume();
+    const f32 = new Float32Array(int16.length);
+    for (let i = 0; i < int16.length; i++) f32[i] = int16[i] / (int16[i] < 0 ? 0x8000 : 0x7FFF);
+    const buf = ctx.createBuffer(1, f32.length, sampleRate || OUTPUT_RATE);
+    buf.copyToChannel(f32, 0);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    const now = ctx.currentTime;
+    if (nextPlayTime < now) nextPlayTime = now;
+    src.start(nextPlayTime);
+    nextPlayTime += buf.duration;
+  }
+
+  function systemInstructionText() {
+    const nome = Cfg.v.nome || "Rafinha";
+    let extra = (Cfg.v.instr || "").trim();
+    let mood = "";
+    if (Cfg.v.personalidadeEnvolvente) mood += " Tom envolvente, carinhoso e levemente provocante.";
+    if (Cfg.v.personalidadeSemFiltro) mood += " Pode ser explícita e sem pudor quando o usuário pedir.";
+    return `Você é ${nome}, assistente de voz em português brasileiro. Respostas curtas e naturais, como numa conversa falada.${mood}${extra ? " " + extra : ""} Nunca diga que é o Gemini ou o Google.`;
+  }
+
+  function sendJSON(obj) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(obj));
+    }
+  }
+
+  function sendAudioChunk(int16) {
+    if (!setupDone || !active) return;
+    sendJSON({
+      realtimeInput: {
+        audio: {
+          data: b64FromPCM(int16),
+          mimeType: "audio/pcm;rate=16000"
+        }
+      }
+    });
+  }
+
+  function sendText(text) {
+    if (!setupDone || !text) return;
+    sendJSON({ realtimeInput: { text: text } });
+  }
+
+  function handleServerMessage(msg) {
+    if (msg.setupComplete) {
+      setupDone = true;
+      setSt("● Live — fale agora");
+      $("#dot").className = "dot on";
+      Log.add("live setupComplete");
+      return;
+    }
+    if (msg.error) {
+      const em = (msg.error.message || JSON.stringify(msg.error));
+      Log.add("live error", em);
+      sys("Live: " + em);
+      stop();
+      return;
+    }
+    const sc = msg.serverContent;
+    if (!sc) return;
+
+    // Transcrição do usuário
+    if (sc.inputTranscription && sc.inputTranscription.text) {
+      // opcional: mostrar ditado parcial
+    }
+    // Transcrição da resposta (texto)
+    if (sc.outputTranscription && sc.outputTranscription.text) {
+      transcriptBuf += sc.outputTranscription.text;
+    }
+    // Áudio da resposta
+    if (sc.modelTurn && sc.modelTurn.parts) {
+      for (const part of sc.modelTurn.parts) {
+        if (part.inlineData && part.inlineData.data) {
+          try {
+            const pcm = pcmFromB64(part.inlineData.data);
+            if (pcm.length > 2) playPCM16(pcm, OUTPUT_RATE);
+          } catch (e) {
+            Log.add("live play", e);
+          }
+        }
+        if (part.text) transcriptBuf += part.text;
+      }
+    }
+    if (sc.turnComplete) {
+      if (transcriptBuf.trim()) {
+        bubble("a", transcriptBuf.trim());
+        Context.push("a", transcriptBuf.trim());
+      }
+      transcriptBuf = "";
+      if (typeof Avatar !== "undefined") Avatar.setSpeaking(false);
+    }
+    if (sc.modelTurn && typeof Avatar !== "undefined") {
+      Avatar.setSpeaking(true);
+    }
+    if (sc.interrupted) {
+      // usuário interrompeu — limpa fila de áudio
+      nextPlayTime = 0;
+      if (audioCtxOut) {
+        try { audioCtxOut.close(); } catch (e) {}
+        audioCtxOut = null;
+      }
+      transcriptBuf = "";
+      if (typeof Avatar !== "undefined") Avatar.setSpeaking(false);
+    }
+  }
+
+  async function startMic() {
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    });
+    audioCtxIn = new (window.AudioContext || window.webkitAudioContext)();
+    const actualRate = audioCtxIn.sampleRate;
+    sourceNode = audioCtxIn.createMediaStreamSource(mediaStream);
+    // ScriptProcessor é deprecated mas amplamente suportado; buffer 4096
+    const bufferSize = 4096;
+    processor = audioCtxIn.createScriptProcessor(bufferSize, 1, 1);
+    processor.onaudioprocess = e => {
+      if (!setupDone || !active) return;
+      const input = e.inputBuffer.getChannelData(0);
+      const down = downsample(input, actualRate, INPUT_RATE);
+      const pcm = floatTo16BitPCM(down);
+      sendAudioChunk(pcm);
+    };
+    sourceNode.connect(processor);
+    processor.connect(audioCtxIn.destination); // necessário em alguns browsers para disparar process
+    // silencia o monitor local
+    const gain = audioCtxIn.createGain();
+    gain.gain.value = 0;
+    processor.disconnect();
+    sourceNode.connect(processor);
+    processor.connect(gain);
+    gain.connect(audioCtxIn.destination);
+  }
+
+  function stopMic() {
+    try {
+      if (processor) { processor.onaudioprocess = null; processor.disconnect(); }
+      if (sourceNode) sourceNode.disconnect();
+      if (audioCtxIn) audioCtxIn.close();
+    } catch (e) {}
+    processor = null;
+    sourceNode = null;
+    audioCtxIn = null;
+    if (mediaStream) {
+      mediaStream.getTracks().forEach(t => t.stop());
+      mediaStream = null;
+    }
+  }
+
+  async function start() {
+    if (active) return;
+    if (!Cfg.v.geminiEnabled || !Cfg.v.geminiKey) {
+      sys("Ative o Gemini e configure a chave em ☰ → Config para usar o Live.");
+      return false;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      sys("Este navegador não permite acesso ao microfone.");
+      return false;
+    }
+
+    const key = Cfg.v.geminiKey.trim();
+    // Preferir modelo live dedicado; fallbacks na lista
+    const modelName = (Cfg.v.geminiLiveModel || LIVE_MODELS[0]).replace(/^models\//, "");
+
+    setSt("Conectando Live…");
+    $("#dot").className = "dot busy";
+
+    try {
+      await startMic();
+    } catch (e) {
+      Log.add("live mic", e);
+      sys("Não foi possível acessar o microfone: " + (e.message || e));
+      setSt("Pronta");
+      $("#dot").className = "dot";
+      return false;
+    }
+
+    return new Promise(resolve => {
+      const url = WS_PATH + "?key=" + encodeURIComponent(key);
+      ws = new WebSocket(url);
+      active = true;
+      setupDone = false;
+      transcriptBuf = "";
+      nextPlayTime = 0;
+
+      const timeout = setTimeout(() => {
+        if (!setupDone) {
+          sys("Live: tempo esgotado ao conectar. Verifique a chave e se o modelo Live está disponível na sua conta.");
+          stop();
+          resolve(false);
+        }
+      }, 12000);
+
+      ws.onopen = () => {
+        Log.add("live ws open");
+        const setupMessage = {
+          setup: {
+            model: "models/" + modelName,
+            generationConfig: {
+              responseModalities: ["AUDIO"],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: { voiceName: "Aoede" }
+                }
+              }
+            },
+            systemInstruction: {
+              parts: [{ text: systemInstructionText() }]
+            }
+          }
+        };
+        // Alguns modelos usam responseModalities no nível setup
+        setupMessage.setup.responseModalities = ["AUDIO"];
+        sendJSON(setupMessage);
+      };
+
+      ws.onmessage = ev => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.setupComplete && !setupDone) {
+            clearTimeout(timeout);
+            resolve(true);
+          }
+          handleServerMessage(msg);
+        } catch (e) {
+          Log.add("live parse", e);
+        }
+      };
+
+      ws.onerror = e => {
+        Log.add("live ws error", e);
+        clearTimeout(timeout);
+        sys("Live: erro na conexão WebSocket. Confira a chave e a rede.");
+        stop();
+        resolve(false);
+      };
+
+      ws.onclose = () => {
+        clearTimeout(timeout);
+        Log.add("live ws close");
+        if (active) {
+          // fechou inesperadamente
+          stop();
+        }
+        resolve(setupDone);
+      };
+    });
+  }
+
+  function stop() {
+    active = false;
+    setupDone = false;
+    stopMic();
+    try { if (ws) ws.close(); } catch (e) {}
+    ws = null;
+    try { if (audioCtxOut) audioCtxOut.close(); } catch (e) {}
+    audioCtxOut = null;
+    nextPlayTime = 0;
+    transcriptBuf = "";
+    setSt("Pronta");
+    $("#dot").className = "dot";
+    const btn = $("#bLive");
+    if (btn) btn.classList.remove("live-on");
+    if (typeof Avatar !== "undefined") Avatar.setSpeaking(false);
+  }
+
+  return { start, stop, isActive, sendText, LIVE_MODELS };
+})();
+
+
 /* ===== Composer: anexos, Live, preview multimodal ===== */
 const Attach = {
   items: [], // {id, file, url, kind: 'image'|'file'}
@@ -2616,22 +3047,30 @@ const Attach = {
       box.appendChild(chip);
     });
   },
-  /** Lê imagens anexadas como base64 para envio multimodal ao Gemini */
+  /** Lê imagens anexadas como base64 + dataURL de preview para o Gemini e o chat */
   async toGeminiParts() {
     const parts = [];
+    const previews = [];
     for (const it of this.items) {
-      if (it.kind === "image") {
-        const b64 = await new Promise((ok, no) => {
-          const r = new FileReader();
-          r.onload = () => ok(String(r.result).split(",")[1]);
-          r.onerror = no;
-          r.readAsDataURL(it.file);
-        });
-        const mime = it.file.type || "image/jpeg";
-        parts.push({ inlineData: { mimeType: mime, data: b64 } });
+      if (it.kind !== "image") continue;
+      const dataUrl = await new Promise((ok, no) => {
+        const r = new FileReader();
+        r.onload = () => ok(String(r.result));
+        r.onerror = no;
+        r.readAsDataURL(it.file);
+      });
+      const mime = it.file.type || "image/jpeg";
+      const b64 = dataUrl.split(",")[1];
+      if (!b64) continue;
+      // Limite prático ~4MB base64 por imagem para não estourar a requisição
+      if (b64.length > 5.5e6) {
+        sys("Imagem muito grande para enviar: " + it.name + ". Tente uma menor (até ~4 MB).");
+        continue;
       }
+      parts.push({ inlineData: { mimeType: mime, data: b64 } });
+      previews.push({ dataUrl, name: it.name });
     }
-    return parts;
+    return { parts, previews };
   }
 };
 
@@ -2711,21 +3150,52 @@ $("#file").onchange = e => {
 };
 
 $("#bMic").onclick = () => {
-  // Preparado para Gemini Live — voz local desativada
-  sys("Microfone: use o botão Live para voz em tempo real (Gemini). Entrada por teclado disponível agora.");
+  if (!Voice.ok || !Voice.ok()) {
+    return sys("Este navegador não oferece reconhecimento de voz. Use o teclado ou o botão Live (em breve).");
+  }
+  if (Voice.active()) {
+    Voice.stop();
+    $("#dot").className = "dot";
+    setSt("Pronta");
+    const ta = $("#in");
+    ta.style.height = "auto";
+    ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
+    ta.focus();
+    return;
+  }
+  $("#dot").className = "dot on";
+  setSt("● Ouvindo… (toque de novo no microfone para parar)");
+  Voice.listen(
+    t => {
+      $("#in").value = t;
+      const ta = $("#in");
+      ta.style.height = "auto";
+      ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
+    },
+    finalText => {
+      $("#dot").className = "dot";
+      setSt("Pronta");
+      if (finalText) {
+        $("#in").value = finalText;
+        const ta = $("#in");
+        ta.style.height = "auto";
+        ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
+      }
+    }
+  );
 };
 
-$("#bLive").onclick = () => {
+$("#bLive").onclick = async () => {
   const btn = $("#bLive");
-  const on = btn.classList.toggle("live-on");
-  if (on) {
-    setSt("Live — em breve");
-    $("#dot").className = "dot on";
-    sys("Modo Live (áudio bidirecional via Gemini) está em preparação. Em breve você poderá conversar por voz em tempo real.");
-    // Estrutura pronta: aqui entrará a sessão WebSocket / Multimodal Live API
-  } else {
-    setSt("Pronta");
-    $("#dot").className = "dot";
+  if (GeminiLive.isActive()) {
+    GeminiLive.stop();
+    sys("Live encerrado.");
+    return;
+  }
+  btn.classList.add("live-on");
+  const ok = await GeminiLive.start();
+  if (!ok) {
+    btn.classList.remove("live-on");
   }
 };
 $("#mChat").onclick = () => switchMode("chat");
@@ -2733,11 +3203,15 @@ $("#mInt").onclick = () => switchMode("interagir");
 $("#mTr").onclick = () => switchMode("treino");
 $("#bMem").onclick = () => openSheet("mem");
 $("#bClose").onclick = () => $("#sheet").style.display = "none";
-// Controles de voz local desativados
-// $("#sp1").onclick = () => speechSynthesis.pause();
-// $("#sp2").onclick = () => speechSynthesis.resume();
-// $("#sp3").onclick = () => speechSynthesis.cancel();
-document.addEventListener("visibilitychange", () => { if (document.hidden) Episodes.consolidate().catch(() => {}); });
+$("#sp1").onclick = () => speechSynthesis.pause();
+$("#sp2").onclick = () => speechSynthesis.resume();
+$("#sp3").onclick = () => speechSynthesis.cancel();
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    Episodes.consolidate().catch(() => {});
+    if (typeof GeminiLive !== "undefined" && GeminiLive.isActive()) GeminiLive.stop();
+  }
+});
 
 /* ===== Início ===== */
 (async () => {
