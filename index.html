@@ -47,143 +47,40 @@ pre{white-space:pre-wrap;font-size:12px;margin:0}
 #modes{display:flex;gap:6px;padding:8px 14px;background:var(--card);border-bottom:1px solid var(--bd)}
 #modes button{flex:1;font-size:13px;padding:8px 6px}#modes button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
 #trB{display:none;padding:6px 14px;font-size:13px;background:var(--bg);color:var(--mut);border-bottom:1px dashed var(--bd)}
-/* ===== Interagir / Avatar — layout imersivo ===== */
-#interact{
-  display:none;flex-direction:column;flex:1;min-height:0;position:relative;
-  background:#0a0b10;overflow:hidden;
-}
-#avatarStage{
-  position:absolute;inset:0;z-index:0;
-  background:linear-gradient(180deg,#14151c 0%,#0a0b10 100%);
-  overflow:hidden;display:flex;align-items:center;justify-content:center;
-}
-#avatarImg,#avatarVid{
-  width:100%;height:100%;max-width:100%;max-height:100%;
-  object-fit:contain;object-position:center center;
-  transition:opacity .35s,object-fit .25s;user-select:none;
-  transform-origin:center center;
-}
-#avatarImg.cover,#avatarVid.cover{object-fit:cover}
-#avatarVid{display:none}
-#avatarImg.idle,#avatarVid.idle{animation:avatarIdle 3.6s ease-in-out infinite}
-#avatarImg.speaking,#avatarVid.speaking{
-  animation:speakPulse .4s ease-in-out infinite alternate;
-  filter:drop-shadow(0 0 18px rgba(91,91,214,.35));
-}
-#avatarImg.dance,#avatarVid.dance{animation:avatarDance .55s ease-in-out infinite alternate}
-@keyframes avatarIdle{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
-@keyframes speakPulse{from{transform:scale(1)}to{transform:scale(1.015)}}
-@keyframes avatarDance{from{transform:translateX(-5px) rotate(-1deg)}to{transform:translateX(5px) rotate(1deg)}}
+/* ===== Interagir / Avatar ===== */
+#interact{display:none;flex-direction:column;flex:1;min-height:0;position:relative}
+#avatarStage{position:relative;flex:0 0 auto;height:42vh;max-height:380px;background:linear-gradient(180deg,#1a1a22 0%,#12131a 100%);overflow:hidden;display:flex;align-items:flex-end;justify-content:center}
+#avatarImg{max-height:100%;max-width:100%;object-fit:contain;object-position:center bottom;transition:opacity .35s;user-select:none;transform-origin:center bottom}
+#avatarImg.idle{animation:avatarIdle 3.2s ease-in-out infinite}
+#avatarImg.speaking{animation:speakPulse .38s ease-in-out infinite alternate;filter:drop-shadow(0 0 12px rgba(91,91,214,.35))}
+#avatarImg.dance{animation:avatarDance .55s ease-in-out infinite alternate}
+@keyframes avatarIdle{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+@keyframes speakPulse{from{transform:scale(1) translateY(0)}to{transform:scale(1.025) translateY(-3px)}}
+@keyframes avatarDance{from{transform:translateX(-8px) rotate(-2deg)}to{transform:translateX(8px) rotate(2deg)}}
+#avatarLabel{position:absolute;left:10px;bottom:10px;background:rgba(0,0,0,.55);color:#fff;font-size:12px;padding:4px 10px;border-radius:8px;backdrop-filter:blur(4px)}
+#avatarFloat{position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:6px;z-index:5}
+#avatarFloat button{background:rgba(28,30,41,.85);color:#eceef7;border:1px solid rgba(255,255,255,.15);border-radius:20px;padding:8px 12px;font-size:12px;backdrop-filter:blur(8px);white-space:nowrap;cursor:pointer}
+#avatarFloat button:active{transform:scale(.96)}
+#avatarFloat button.on{background:var(--ac);border-color:var(--ac);color:#fff}
+#interactChat{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;min-height:0}
+#interactEmpty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:14px;text-align:center;padding:20px;pointer-events:none}
 
-#avatarLabel{
-  position:absolute;left:12px;top:12px;z-index:3;
-  background:rgba(0,0,0,.45);color:#fff;font-size:11px;font-weight:500;
-  padding:5px 11px;border-radius:999px;backdrop-filter:blur(8px);
-  border:1px solid rgba(255,255,255,.1);letter-spacing:.02em;
-}
-
-/* Controles recolhíveis — só Som e Retrato */
-#avatarCtrls{
-  position:absolute;right:10px;top:10px;z-index:6;
-  display:flex;flex-direction:column;align-items:flex-end;gap:6px;
-}
-#bFab{
-  width:40px;height:40px;border-radius:50%;padding:0;font-size:18px;
-  background:rgba(20,22,32,.75);color:#fff;border:1px solid rgba(255,255,255,.18);
-  backdrop-filter:blur(10px);cursor:pointer;display:flex;align-items:center;justify-content:center;
-  box-shadow:0 4px 16px rgba(0,0,0,.35);transition:transform .15s,background .15s;
-}
-#bFab:active{transform:scale(.94)}
-#bFab.open{background:var(--ac);border-color:var(--ac)}
-#avatarCtrlsMenu{
-  display:none;flex-direction:column;gap:6px;align-items:flex-end;
-  animation:fabIn .18s ease-out;
-}
-#avatarCtrlsMenu.open{display:flex}
-@keyframes fabIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
-#avatarCtrlsMenu button{
-  background:rgba(20,22,32,.85);color:#fff;border:1px solid rgba(255,255,255,.15);
-  border-radius:20px;padding:8px 14px;font-size:12px;backdrop-filter:blur(10px);
-  cursor:pointer;white-space:nowrap;box-shadow:0 2px 10px rgba(0,0,0,.25);
-  transition:background .15s,transform .12s;
-}
-#avatarCtrlsMenu button:active{transform:scale(.96)}
-#avatarCtrlsMenu button.on{background:var(--ac);border-color:var(--ac)}
-
-/* Barra horizontal de comandos personalizados (topo) */
-#avCmdBar{
-  position:absolute;left:12px;right:58px;top:52px;z-index:5;
-  display:flex;gap:8px;overflow-x:auto;overflow-y:hidden;
-  padding:4px 2px 8px;scroll-snap-type:x mandatory;
-  -webkit-overflow-scrolling:touch;scrollbar-width:none;
-}
-#avCmdBar::-webkit-scrollbar{display:none}
-#avCmdBar:empty{display:none}
-#avCmdBar button{
-  flex:0 0 auto;scroll-snap-align:start;
-  border-radius:999px;padding:8px 14px;font-size:12px;font-weight:500;
-  background:rgba(20,22,32,.72);color:#fff;border:1px solid rgba(255,255,255,.14);
-  backdrop-filter:blur(10px);cursor:pointer;white-space:nowrap;
-  box-shadow:0 2px 10px rgba(0,0,0,.25);transition:background .15s,transform .12s,border-color .15s;
-}
-#avCmdBar button:active{transform:scale(.96)}
-#avCmdBar button.on{
-  background:var(--ac);border-color:var(--ac);
-  box-shadow:0 2px 14px rgba(91,91,214,.45);
-}
-#avCmdBar .avCmdHint{
-  flex:0 0 auto;font-size:11px;color:rgba(255,255,255,.4);
-  padding:8px 4px;white-space:nowrap;
-}
-
-/* Chat overlay — mensagens sobre o vídeo, sem fundo de bolha */
-#interactChat{
-  position:absolute;left:0;right:0;bottom:0;z-index:4;
-  max-height:42%;overflow-y:auto;overflow-x:hidden;
-  padding:12px 14px 10px;display:flex;flex-direction:column;gap:8px;
-  pointer-events:none;
-  background:linear-gradient(180deg,transparent 0%,rgba(0,0,0,.12) 25%,rgba(0,0,0,.38) 100%);
-  -webkit-mask-image:linear-gradient(180deg,transparent 0%,#000 16%);
-  mask-image:linear-gradient(180deg,transparent 0%,#000 16%);
-}
-#interactChat .m{
-  pointer-events:auto;max-width:92%;
-  background:transparent!important;border:none!important;
-  padding:4px 2px;border-radius:0;box-shadow:none;
-  color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.85),0 0 8px rgba(0,0,0,.4);
-  animation:msgIn .25s ease-out both;
-}
-#interactChat .m.u{align-self:flex-end;color:#e8eaf6}
-#interactChat .m.a{align-self:flex-start;color:#fff}
-#interactChat .m.s{align-self:center;color:rgba(255,255,255,.65);font-size:12px;text-shadow:none}
-#interactChat .m .sp{
-  margin-top:4px;font-size:11px;color:rgba(255,255,255,.55);
-  text-shadow:none;display:flex;gap:10px;flex-wrap:wrap;
-}
-#interactChat .m .sp span{cursor:pointer;opacity:.8}
-#interactChat .m .sp span:active{opacity:1}
-
-/* Fullscreen */
-#avatarStage:fullscreen{height:100vh;max-height:none}
-#avatarStage:fullscreen #avatarImg,
-#avatarStage:fullscreen #avatarVid{width:100%;height:100%}
-
-/* Barra de input no modo interagir — sempre acima, com fundo sólido */
-body.mode-int #bar{
-  position:relative;z-index:30;
-  background:var(--card);border-top:1px solid var(--bd);
-  padding-bottom:max(10px,env(safe-area-inset-bottom,0px));
-  box-shadow:0 -4px 20px rgba(0,0,0,.2);
-}
-body.mode-int #spk{position:relative;z-index:30;background:var(--card)}
-body.mode-int header,body.mode-int #modes{position:relative;z-index:30}
-
+/* ===== Avatar: mídia externa, tela cheia e página de config ===== */
+#avatarStage:fullscreen{height:100vh;max-height:none;border-radius:0}
+#avatarStage:fullscreen #avatarImg,#avatarStage:fullscreen #avatarVid{max-height:100vh}
+#avatarVid{max-height:100%;max-width:100%;object-fit:contain;object-position:center bottom;display:none;transform-origin:center bottom}
+#avatarVid.idle{animation:avatarIdle 3.2s ease-in-out infinite}
+#avatarVid.speaking{animation:speakPulse .38s ease-in-out infinite alternate}
+#avatarVid.dance{animation:avatarDance .55s ease-in-out infinite alternate}
+#bFs{position:absolute;right:10px;bottom:10px;z-index:6;background:rgba(0,0,0,.55);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:20px;padding:6px 12px;font-size:12px;backdrop-filter:blur(4px);cursor:pointer}
 .avgrid{display:grid;grid-template-columns:1fr;gap:8px}
+.avgrid label select{font-size:13px}
 .avhint{font-size:12px;color:var(--mut);line-height:1.4}
 .avsec{font-weight:600;margin-top:6px;font-size:14px}
+
 .avCmdName{flex:2;min-width:0}
 .avCmdMedia{flex:2;min-width:0}
-</style>
+</style></style>
 </head>
 <body>
 <header>
@@ -201,17 +98,10 @@ body.mode-int header,body.mode-int #modes{position:relative;z-index:30}
 <div id="interact">
   <div id="avatarStage">
     <img id="avatarImg" alt="Rafinha" draggable="false">
-    <div id="avatarLabel">Rafinha</div>
-    <div id="avatarCtrls">
-      <button type="button" id="bFab" title="Controles" aria-label="Abrir controles">⋯</button>
-      <div id="avatarCtrlsMenu" role="menu">
-        <button type="button" id="bMute" role="menuitem">🔇 Som</button>
-        <button type="button" id="bCover" role="menuitem">🖼 Retrato</button>
-      </div>
-    </div>
-    <div id="avCmdBar" aria-label="Comandos personalizados"></div>
+    <div id="avatarLabel">Comportada</div>
+    <button id="bFs" title="Tela cheia">⛶ Tela cheia</button>
   </div>
-  <div id="interactChat" aria-live="polite"></div>
+  <div id="interactChat"></div>
 </div>
 <div id="spk">
   <button id="sp1">⏸ Pausar</button>
@@ -323,7 +213,12 @@ const Cfg = {
     geminiEnabled: false,
     geminiModel: "gemini-3.5-flash-lite",
     personalidadeEnvolvente: false,
-    personalidadeSemFiltro: false
+    personalidadeSemFiltro: false,
+    geminiTts: true,
+    geminiVoice: "Kore",
+    geminiTtsModel: "gemini-3.8-flash-lite-tts",
+    geminiImageModel: "gemini-3.1-flash-image",
+    geminiLiveModel: "gemini-3.8-live"
   },
   async load() {
     const all = await DB.all("settings");
@@ -334,6 +229,11 @@ const Cfg = {
     if (this.v.geminiEnabled == null) this.v.geminiEnabled = false;
     if (this.v.personalidadeEnvolvente == null) this.v.personalidadeEnvolvente = false;
     if (this.v.personalidadeSemFiltro == null) this.v.personalidadeSemFiltro = false;
+    if (this.v.geminiTts == null) this.v.geminiTts = true;
+    if (!this.v.geminiVoice) this.v.geminiVoice = "Kore";
+    if (!this.v.geminiTtsModel) this.v.geminiTtsModel = "gemini-3.8-flash-lite-tts";
+    if (!this.v.geminiImageModel) this.v.geminiImageModel = "gemini-3.1-flash-image";
+    if (!this.v.geminiLiveModel) this.v.geminiLiveModel = "gemini-3.8-live";
     // migra modelos antigos/descontinuados ou sobrecarregados
     if (!this.v.geminiModel || /gemini-2\.0-flash|gemini-3\.8-flash$/.test(this.v.geminiModel)) {
       this.v.geminiModel = "gemini-3.5-flash-lite";
@@ -898,6 +798,418 @@ const AndroidBridge = {
   openApplication() { return this._n(); },
   lockScreen() { return this._n(); }
 };
+/* ===== Gemini TTS / Imagem / Live (mesma chave do chat) ===== */
+const GEMINI_VOICES = [
+  { id: "Kore", label: "Kore (firme)" },
+  { id: "Aoede", label: "Aoede (leve)" },
+  { id: "Leda", label: "Leda (jovem)" },
+  { id: "Puck", label: "Puck (animado)" },
+  { id: "Charon", label: "Charon (informativo)" },
+  { id: "Zephyr", label: "Zephyr (brilhante)" },
+  { id: "Fenrir", label: "Fenrir (excitável)" },
+  { id: "Orus", label: "Orus (firme)" },
+  { id: "Autonoe", label: "Autonoe (clara)" },
+  { id: "Callirrhoe", label: "Callirrhoe (tranquila)" },
+  { id: "Enceladus", label: "Enceladus (suave)" },
+  { id: "Iapetus", label: "Iapetus (nítida)" },
+  { id: "Umbriel", label: "Umbriel (descontraída)" },
+  { id: "Algieba", label: "Algieba (suave)" },
+  { id: "Despina", label: "Despina (suave)" },
+  { id: "Erinome", label: "Erinome (clara)" },
+  { id: "Laomedeia", label: "Laomedeia (animada)" },
+  { id: "Achernar", label: "Achernar (macia)" },
+  { id: "Alnilam", label: "Alnilam (firme)" },
+  { id: "Rasalgethi", label: "Rasalgethi (informativa)" }
+];
+
+const GeminiAudio = {
+  _ctx: null,
+  _src: null,
+  _playing: false,
+
+  async canUse() {
+    return !!(Cfg.v.geminiEnabled && Cfg.v.geminiTts && Cfg.v.geminiKey && (await AIProvider.canUseGemini()));
+  },
+
+  stop() {
+    try { if (this._src) { this._src.stop(); this._src.disconnect(); } } catch (e) {}
+    this._src = null;
+    this._playing = false;
+    const spk = $("#spk"); if (spk) spk.style.display = "none";
+    if (typeof Avatar !== "undefined") Avatar.setSpeaking(false);
+  },
+
+  async speak(text, style) {
+    if (!(await this.canUse())) return false;
+    const key = Cfg.v.geminiKey.trim();
+    const model = Cfg.v.geminiTtsModel || "gemini-3.8-flash-lite-tts";
+    const voice = Cfg.v.geminiVoice || "Kore";
+    const styleTxt = style || (Cfg.v.personalidadeSemFiltro
+      ? "seductive, warm, intimate Brazilian Portuguese"
+      : Cfg.v.personalidadeEnvolvente
+        ? "warm, affectionate, playful Brazilian Portuguese"
+        : "natural, friendly Brazilian Portuguese, clear and warm");
+
+    this.stop();
+    setSt("Falando…");
+    $("#dot").className = "dot busy";
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+        body: JSON.stringify({
+          contents: [{
+            role: "user",
+            parts: [{ text: String(text).slice(0, 4000), speech_metadata: { style: styleTxt } }]
+          }],
+          generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: { voiceConfig: { voice } }
+          }
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        Log.add("gemini tts", (data.error && data.error.message) || res.status);
+        return false;
+      }
+      const b64 = data.candidates && data.candidates[0] && data.candidates[0].content &&
+        data.candidates[0].content.parts && data.candidates[0].content.parts[0] &&
+        data.candidates[0].content.parts[0].inlineData &&
+        data.candidates[0].content.parts[0].inlineData.data;
+      if (!b64) return false;
+      await GeminiUsage.inc();
+      await this._playBase64Audio(b64, data.candidates[0].content.parts[0].inlineData.mimeType || "audio/wav");
+      return true;
+    } catch (e) {
+      Log.add("gemini tts fetch", e);
+      return false;
+    } finally {
+      setSt("Pronta");
+      $("#dot").className = "dot";
+    }
+  },
+
+  async _playBase64Audio(b64, mime) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+
+    // WAV completo (unary) ou PCM cru
+    let ab = bytes.buffer;
+    if (!/wav|wave/i.test(mime || "") && bytes.length > 44) {
+      // Empacota PCM 24kHz mono 16-bit em WAV
+      ab = this._pcmToWav(bytes, 24000).buffer;
+    }
+
+    if (!this._ctx) this._ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (this._ctx.state === "suspended") await this._ctx.resume();
+
+    const audioBuf = await this._ctx.decodeAudioData(ab.slice(0));
+    return new Promise(resolve => {
+      const src = this._ctx.createBufferSource();
+      src.buffer = audioBuf;
+      src.connect(this._ctx.destination);
+      this._src = src;
+      this._playing = true;
+      const spk = $("#spk"); if (spk) spk.style.display = "flex";
+      if (typeof Avatar !== "undefined") Avatar.setSpeaking(true);
+      src.onended = () => {
+        this._playing = false;
+        this._src = null;
+        if (spk) spk.style.display = "none";
+        if (typeof Avatar !== "undefined") Avatar.setSpeaking(false);
+        resolve();
+      };
+      src.start(0);
+    });
+  },
+
+  _pcmToWav(pcmBytes, sampleRate) {
+    const n = pcmBytes.length;
+    const buf = new ArrayBuffer(44 + n);
+    const v = new DataView(buf);
+    const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+    w(0, "RIFF"); v.setUint32(4, 36 + n, true); w(8, "WAVE"); w(12, "fmt ");
+    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, sampleRate, true); v.setUint32(28, sampleRate * 2, true);
+    v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, "data"); v.setUint32(40, n, true);
+    new Uint8Array(buf, 44).set(pcmBytes);
+    return new Uint8Array(buf);
+  }
+};
+
+const GeminiImage = {
+  async generate(prompt) {
+    if (!(await AIProvider.canUseGemini())) return { error: "Gemini desligado ou sem cota." };
+    const key = Cfg.v.geminiKey.trim();
+    const model = Cfg.v.geminiImageModel || "gemini-3.1-flash-image";
+    setSt("Gerando imagem…");
+    $("#dot").className = "dot busy";
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { responseModalities: ["TEXT", "IMAGE"] }
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        const msg = (data.error && data.error.message) || ("HTTP " + res.status);
+        return { error: msg };
+      }
+      await GeminiUsage.inc();
+      const parts = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [];
+      let text = "", img = null;
+      for (const p of parts) {
+        if (p.text) text += p.text;
+        if (p.inlineData && /image\//i.test(p.inlineData.mimeType || "")) {
+          img = { mime: p.inlineData.mimeType, data: p.inlineData.data };
+        }
+      }
+      if (!img) return { error: "Modelo não retornou imagem. " + (text || "") };
+      return { text: text || "Imagem gerada.", img };
+    } catch (e) {
+      return { error: e.message || String(e) };
+    } finally {
+      setSt("Pronta");
+      $("#dot").className = "dot";
+    }
+  },
+
+  showInChat(result) {
+    if (result.error) return say("Não consegui gerar a imagem: " + result.error);
+    const box = getChatEl();
+    const d = document.createElement("div");
+    d.className = "m a";
+    if (result.text) {
+      const p = document.createElement("div");
+      p.textContent = result.text;
+      d.appendChild(p);
+    }
+    const im = document.createElement("img");
+    im.src = "data:" + result.img.mime + ";base64," + result.img.data;
+    im.alt = "Imagem gerada";
+    im.style.cssText = "max-width:100%;border-radius:12px;margin-top:8px;display:block";
+    d.appendChild(im);
+    const actions = document.createElement("div");
+    actions.className = "sp";
+    actions.style.cssText = "display:flex;gap:8px;margin-top:6px";
+    const bDl = document.createElement("span");
+    bDl.textContent = "⬇ baixar";
+    bDl.style.cursor = "pointer";
+    bDl.onclick = () => {
+      const a = document.createElement("a");
+      a.href = im.src;
+      a.download = "rafinha-" + Date.now() + ".png";
+      a.click();
+    };
+    actions.appendChild(bDl);
+    d.appendChild(actions);
+    box.appendChild(d);
+    box.scrollTop = box.scrollHeight;
+    Context.push("a", result.text || "[imagem gerada]");
+  }
+};
+
+const GeminiLive = {
+  ws: null,
+  active: false,
+  _rec: null,
+  _audioCtx: null,
+  _playTime: 0,
+  _transcript: "",
+
+  isOn() { return this.active && this.ws && this.ws.readyState === 1; },
+
+  async start() {
+    if (!(await AIProvider.canUseGemini())) {
+      sys("Ligue o Gemini e configure a chave em Config para usar o modo Live.");
+      return false;
+    }
+    if (this.active) return true;
+    const key = Cfg.v.geminiKey.trim();
+    const model = Cfg.v.geminiLiveModel || "gemini-3.8-live";
+    const voice = Cfg.v.geminiVoice || "Kore";
+    const nome = Cfg.v.nome || "Rafinha";
+
+    const system = `Você é ${nome}, assistente pessoal do Jean. Fale português brasileiro de forma natural e calorosa.` +
+      (Cfg.v.personalidadeSemFiltro ? " Tom íntimo e ousado quando apropriado." :
+        Cfg.v.personalidadeEnvolvente ? " Tom carinhoso e brincalhão." : "");
+
+    const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(key)}`;
+    setSt("Conectando Live…");
+    $("#dot").className = "dot busy";
+
+    return new Promise(resolve => {
+      try {
+        this.ws = new WebSocket(wsUrl);
+      } catch (e) {
+        sys("WebSocket indisponível: " + e.message);
+        resolve(false);
+        return;
+      }
+      this.ws.onopen = () => {
+        this.ws.send(JSON.stringify({
+          setup: {
+            model: "models/" + model,
+            responseModalities: ["AUDIO"],
+            systemInstruction: { parts: [{ text: system }] },
+            speechConfig: {
+              voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } }
+            },
+            inputAudioTranscription: {},
+            outputAudioTranscription: {}
+          }
+        }));
+      };
+      this.ws.onmessage = async (ev) => {
+        let msg;
+        try {
+          const raw = typeof ev.data === "string" ? ev.data : await ev.data.text();
+          msg = JSON.parse(raw);
+        } catch (e) { return; }
+        if (msg.setupComplete) {
+          this.active = true;
+          setSt("● Live ativo");
+          $("#dot").className = "dot on";
+          this._startMic().then(() => resolve(true)).catch(() => resolve(true));
+          return;
+        }
+        if (msg.serverContent) {
+          const sc = msg.serverContent;
+          if (sc.modelTurn && sc.modelTurn.parts) {
+            for (const part of sc.modelTurn.parts) {
+              if (part.inlineData && part.inlineData.data) {
+                this._playPcmChunk(part.inlineData.data, part.inlineData.mimeType);
+              }
+              if (part.text) {
+                this._transcript += part.text;
+              }
+            }
+          }
+          if (sc.outputTranscription && sc.outputTranscription.text) {
+            this._transcript = sc.outputTranscription.text;
+          }
+          if (sc.inputTranscription && sc.inputTranscription.text) {
+            // opcional: mostrar o que o usuário falou
+          }
+          if (sc.turnComplete && this._transcript) {
+            bubble("a", this._transcript.trim());
+            Context.push("a", this._transcript.trim());
+            this._transcript = "";
+          }
+        }
+        if (msg.error) {
+          Log.add("live error", msg.error);
+          sys("Live: " + (msg.error.message || JSON.stringify(msg.error)));
+        }
+      };
+      this.ws.onerror = () => {
+        sys("Erro na conexão Live.");
+        this.stop();
+        resolve(false);
+      };
+      this.ws.onclose = () => {
+        this.active = false;
+        this._stopMic();
+        setSt("Pronta");
+        $("#dot").className = "dot";
+      };
+    });
+  },
+
+  stop() {
+    this.active = false;
+    this._stopMic();
+    if (this.ws) {
+      try { this.ws.close(); } catch (e) {}
+      this.ws = null;
+    }
+    setSt("Pronta");
+    $("#dot").className = "dot";
+    if (typeof Avatar !== "undefined") Avatar.setSpeaking(false);
+  },
+
+  sendText(t) {
+    if (!this.isOn() || !t) return;
+    this.ws.send(JSON.stringify({ realtimeInput: { text: t } }));
+  },
+
+  async _startMic() {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 }
+    });
+    this._audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    const src = this._audioCtx.createMediaStreamSource(stream);
+    const proc = this._audioCtx.createScriptProcessor(4096, 1, 1);
+    proc.onaudioprocess = e => {
+      if (!this.isOn()) return;
+      const input = e.inputBuffer.getChannelData(0);
+      // float32 -> int16 PCM
+      const pcm = new Int16Array(input.length);
+      for (let i = 0; i < input.length; i++) {
+        const s = Math.max(-1, Math.min(1, input[i]));
+        pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      }
+      const bytes = new Uint8Array(pcm.buffer);
+      let b64 = "";
+      const chunk = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunk) {
+        b64 += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+      }
+      b64 = btoa(b64);
+      try {
+        this.ws.send(JSON.stringify({
+          realtimeInput: { audio: { data: b64, mimeType: "audio/pcm;rate=16000" } }
+        }));
+      } catch (err) {}
+    };
+    src.connect(proc);
+    proc.connect(this._audioCtx.destination);
+    this._rec = { stream, src, proc };
+  },
+
+  _stopMic() {
+    if (this._rec) {
+      try { this._rec.proc.disconnect(); this._rec.src.disconnect(); } catch (e) {}
+      try { this._rec.stream.getTracks().forEach(t => t.stop()); } catch (e) {}
+      this._rec = null;
+    }
+  },
+
+  async _playPcmChunk(b64, mime) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    if (!this._playCtx) this._playCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+    if (this._playCtx.state === "suspended") await this._playCtx.resume();
+    // PCM 16-bit mono 24kHz
+    const samples = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2));
+    const f32 = new Float32Array(samples.length);
+    for (let i = 0; i < samples.length; i++) f32[i] = samples[i] / 32768;
+    const buf = this._playCtx.createBuffer(1, f32.length, 24000);
+    buf.copyToChannel(f32, 0);
+    const src = this._playCtx.createBufferSource();
+    src.buffer = buf;
+    src.connect(this._playCtx.destination);
+    const now = this._playCtx.currentTime;
+    if (this._playTime < now) this._playTime = now;
+    src.start(this._playTime);
+    this._playTime += buf.duration;
+    if (typeof Avatar !== "undefined") Avatar.setSpeaking(true);
+    src.onended = () => {
+      if (this._playTime <= this._playCtx.currentTime + 0.05) {
+        if (typeof Avatar !== "undefined") Avatar.setSpeaking(false);
+      }
+    };
+  }
+};
+
 const SyncProvider = { ativo: false, nome: "Local (sincronização desativada)" };
 const Tools = {
   list: {},
@@ -1027,7 +1339,18 @@ const Voice = (() => {
   };
 
   function speak(t) {
+    // Preferência: voz nativa do Gemini (TTS) quando ligada
+    if (Cfg.v.geminiEnabled && Cfg.v.geminiTts && Cfg.v.geminiKey) {
+      GeminiAudio.speak(t).then(ok => {
+        if (!ok) speakBrowser(t);
+      });
+      return;
+    }
+    speakBrowser(t);
+  }
+  function speakBrowser(t) {
     if (!synOk()) return sys("Este navegador não oferece síntese de voz.");
+    try { GeminiAudio.stop(); } catch (e) {}
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(t);
     u.lang = "pt-BR";
@@ -1101,16 +1424,15 @@ const Avatar = (() => {
     sexy: ["Sexy completa", "Sexy parcialmente", "Lingerie sexy", "Sem sutiã", "Nua"]
   };
   /* ================= NOVO MOTOR DE MÍDIA (pasta / uploads / padrão) ================= */
-  const state = { outfit: "comportada", undress: 0, pose: "idle", speaking: false, muted: true, cover: false };
+  const state = { outfit: "comportada", undress: 0, pose: "idle", speaking: false };
 
   const AvatarCfg = {
-    v: { initial: "comportada", assets: {}, uploads: {}, custom: [] },
+    v: { initial: "comportada", assets: {}, uploads: {} },
     dir: null,
     async load() {
       const all = await DB.all("settings");
       const c = all.find(x => x.id === "avatarCfg");
       if (c) Object.assign(this.v, c);
-      if (!Array.isArray(this.v.custom)) this.v.custom = [];
       this.dir = (all.find(x => x.id === "avatarDir") || {}).handle || null;
       state.outfit = this.v.initial === "sexy" ? "sexy" : "comportada";
     },
@@ -1159,11 +1481,6 @@ const Avatar = (() => {
     return base;
   }
 
-  function applyCover(el) {
-    if (!el) return;
-    el.classList.toggle("cover", !!state.cover);
-  }
-
   async function render() {
     await ready();
     const stage = $("#avatarStage"); if (!stage) return;
@@ -1171,7 +1488,6 @@ const Avatar = (() => {
     let vid = $("#avatarVid");
     const key = currentKey();
     const media = await resolveMedia(AvatarCfg.v.assets[key]);
-    const bMute = $("#bMute");
 
     if (curUrl && (!media || media.file)) { try { URL.revokeObjectURL(curUrl); } catch (e) {} curUrl = null; }
 
@@ -1179,110 +1495,22 @@ const Avatar = (() => {
       if (media.file) curUrl = media.url;
       if (!vid) {
         vid = document.createElement("video");
-        vid.id = "avatarVid";
-        vid.playsInline = true;
-        vid.setAttribute("playsinline", "");
-        vid.setAttribute("webkit-playsinline", "");
-        vid.loop = true;
+        vid.id = "avatarVid"; vid.playsInline = true; vid.muted = true; vid.loop = true;
         stage.insertBefore(vid, img);
       }
-      if (vid.src !== media.url) { vid.src = media.url; vid.load(); }
-      vid.muted = !!state.muted;
+      if (vid.src !== media.url) vid.src = media.url;
       vid.className = state.pose + (state.speaking ? " speaking" : "");
-      applyCover(vid);
-      if (key === "strip") {
-        vid.loop = false;
-        vid.onended = () => { state.pose = "idle"; render(); };
-      } else {
-        vid.loop = true;
-        vid.onended = null;
-      }
-      img.style.display = "none";
-      vid.style.display = "block";
-      if (bMute) {
-        bMute.style.display = "inline-block";
-        bMute.textContent = state.muted ? "🔇 Som" : "🔊 Som";
-        bMute.classList.toggle("on", !state.muted);
-      }
-      const p = vid.play();
-      if (p && p.catch) p.catch(() => {
-        if (!state.muted) {
-          state.muted = true;
-          vid.muted = true;
-          if (bMute) { bMute.textContent = "🔇 Som"; bMute.classList.remove("on"); }
-          vid.play().catch(() => {});
-        }
-      });
+      if (key === "strip") { vid.loop = false; vid.onended = () => { state.pose = "idle"; render(); }; }
+      else { vid.loop = true; vid.onended = null; }
+      img.style.display = "none"; vid.style.display = "block";
+      vid.play().catch(() => {});
     } else {
-      if (vid) { try { vid.pause(); } catch (e) {} vid.style.display = "none"; }
+      if (vid) { vid.pause(); vid.style.display = "none"; }
       img.style.display = "block";
       img.src = media ? media.url : ((IMAGES[state.outfit] || {})[state.undress] || "");
       img.className = state.pose + (state.speaking ? " speaking" : "");
-      applyCover(img);
     }
     const lb = $("#avatarLabel"); if (lb) lb.textContent = label();
-    const bCover = $("#bCover");
-    if (bCover) bCover.classList.toggle("on", !!state.cover);
-    if (bMute) {
-      bMute.style.display = "inline-block";
-      bMute.textContent = state.muted ? "🔇 Som" : "🔊 Som";
-      bMute.classList.toggle("on", !state.muted);
-    }
-    renderCmdBar();
-  }
-
-  function toggleMute() {
-    state.muted = !state.muted;
-    const vid = $("#avatarVid");
-    if (vid && vid.style.display !== "none") {
-      vid.muted = state.muted;
-      if (!state.muted) vid.play().catch(() => { state.muted = true; vid.muted = true; });
-    }
-    render();
-    return state.muted ? "Som desligado." : "Som ligado.";
-  }
-
-  function toggleCover() {
-    state.cover = !state.cover;
-    render();
-    return state.cover ? "Modo retrato (preenche a tela)." : "Modo contido (imagem inteira).";
-  }
-
-  /** Barra horizontal no topo: só comandos que o Jean cadastrou */
-  function renderCmdBar() {
-    const bar = $("#avCmdBar"); if (!bar) return;
-    const customs = (AvatarCfg.v.custom || []).filter(c => (c.cmd || "").trim() && AvatarCfg.v.assets["custom:" + c.id]);
-    if (!customs.length) {
-      bar.innerHTML = '<span class="avCmdHint">Cadastre comandos em ☰ → Avatar</span>';
-      return;
-    }
-    bar.innerHTML = customs.map(c => {
-      const on = state.pose === "custom:" + c.id ? " on" : "";
-      return '<button type="button" data-cid="' + esc(c.id) + '" class="' + on.trim() + '">' + esc(c.cmd) + '</button>';
-    }).join("");
-    bar.querySelectorAll("[data-cid]").forEach(btn => {
-      btn.onclick = () => {
-        const id = btn.getAttribute("data-cid");
-        state.pose = "custom:" + id;
-        state.undress = 0;
-        render();
-        renderCmdBar();
-        const c = (AvatarCfg.v.custom || []).find(x => x.id === id);
-        if (typeof say === "function") say("Prontinho… " + ((c && c.cmd) || "") + " 😏");
-      };
-    });
-  }
-
-  function openCmdPanel() { /* legado: não usa mais painel inferior */ renderCmdBar(); }
-
-  function toggleFab(force) {
-    const menu = $("#avatarCtrlsMenu");
-    const fab = $("#bFab");
-    if (!menu || !fab) return;
-    const open = force === true || (force !== false && !menu.classList.contains("open"));
-    menu.classList.toggle("open", open);
-    fab.classList.toggle("open", open);
-    fab.textContent = open ? "✕" : "⋯";
   }
 
   function setOutfit(o) { state.outfit = o; state.undress = 0; state.pose = "idle"; render(); return "Agora estou de " + (o === "sexy" ? "roupa sexy 🔥" : "roupa comportada 👔") + "."; }
@@ -1323,10 +1551,6 @@ const Avatar = (() => {
     }
     if (/\b(tela cheia|fullscreen)\b/.test(n)) return toggleFs(true);
     if (/\b(sair da tela cheia|sai da tela cheia)\b/.test(n)) return toggleFs(false);
-    if (/\b(retratos?|preenche(r)? a tela|modo cover|modo retrato)\b/.test(n)) return toggleCover();
-    if (/\b(mut(e|ar)|sem som|desliga o som)\b/.test(n)) { if (!state.muted) return toggleMute(); return "Já está mudo."; }
-    if (/\b(liga o som|com som|ativa o som|som do v[ií]deo)\b/.test(n)) { if (state.muted) return toggleMute(); return "Som já está ligado."; }
-    if (/\b(comandos? do avatar|abre os comandos|mostra os comandos)\b/.test(n)) { renderCmdBar(); return "Os comandos ficam na barra de cima — deslize para o lado se tiver vários."; }
     if (/^(comportada|vista-se de comportada)\b/.test(n)) return setOutfit("comportada");
     if (/^(sexy|vista-se de sexy|fica sexy)\b/.test(n)) return setOutfit("sexy");
     if (/\b(tira( a)? roupa|strip|despir|fica nua|fique nua|sem roupa|tira tudo)\b/.test(n)) {
@@ -1412,21 +1636,21 @@ const Avatar = (() => {
         const id = sel.getAttribute("data-id"), k = "custom:" + id, v = sel.value;
         if (!v) delete AvatarCfg.v.assets[k];
         else { const p = v.indexOf(":"); AvatarCfg.v.assets[k] = { src: v.slice(0, p), name: v.slice(p + 1) }; }
-        await AvatarCfg.save(); render(); renderCmdBar();
+        await AvatarCfg.save(); render();
       });
       list.querySelectorAll(".avCmdDel").forEach(btn => btn.onclick = async () => {
         const id = btn.getAttribute("data-id");
         if (state.pose === "custom:" + id) { state.pose = "idle"; render(); }
         delete AvatarCfg.v.assets["custom:" + id];
         AvatarCfg.v.custom = AvatarCfg.v.custom.filter(x => x.id !== id);
-        await AvatarCfg.save(); drawList(); renderCmdBar(); sys("Comando excluído.");
+        await AvatarCfg.save(); drawList(); sys("Comando excluído.");
       });
     };
     drawList();
 
     $("#avAdd").onclick = async () => {
       AvatarCfg.v.custom.push({ id: uid(), cmd: "" });
-      await AvatarCfg.save(); drawList(); renderCmdBar();
+      await AvatarCfg.save(); drawList();
       const inputs = document.querySelectorAll(".avCmdName");
       if (inputs.length) inputs[inputs.length - 1].focus();
     };
@@ -1450,24 +1674,11 @@ const Avatar = (() => {
   }
 
   function bindButtons() {
-    const once = (el, fn) => { if (el && !el._b) { el._b = 1; el.onclick = fn; } };
-    once($("#bFab"), () => toggleFab());
-    once($("#bMute"), () => { toggleMute(); });
-    once($("#bCover"), () => { toggleCover(); });
-    if (!document._avFabOut) {
-      document._avFabOut = 1;
-      document.addEventListener("click", e => {
-        const ctrls = $("#avatarCtrls");
-        if (ctrls && !ctrls.contains(e.target)) toggleFab(false);
-      });
-    }
-    renderCmdBar();
+    const b = $("#bFs");
+    if (b && !b._b) { b._b = 1; b.onclick = () => toggleFs(!document.fullscreenElement); }
   }
 
-  return {
-    state, render, setOutfit, strip, dress, dance, idle, setSpeaking,
-    tryCommand, bindButtons, renderAvatarTab, renderCmdBar, toggleMute, toggleCover, IMAGES
-  };
+  return { state, render, setOutfit, strip, dress, dance, idle, setSpeaking, tryCommand, bindButtons, renderAvatarTab, IMAGES };
 })();
 
 /* ===== Conversation / Session / Episodes ===== */
@@ -2440,6 +2651,34 @@ async function handle(text) {
       if (av) return say(av);
     }
 
+    // Modo Live (áudio em tempo real)
+    if (/\b(modo live|live mode|conversa ao vivo|voz ao vivo)\b/i.test(text)) {
+      if (GeminiLive.isOn()) {
+        GeminiLive.stop();
+        return say("Modo Live desligado.");
+      }
+      const ok = await GeminiLive.start();
+      return say(ok ? "Modo Live ligado. Fale pelo microfone — eu respondo com a voz do Gemini. Diga “parar live” para encerrar." : "Não consegui iniciar o Live.");
+    }
+    if (/\b(parar live|stop live|desliga live|encerra live)\b/i.test(text)) {
+      GeminiLive.stop();
+      return say("Modo Live desligado.");
+    }
+    if (GeminiLive.isOn()) {
+      GeminiLive.sendText(text);
+      return; // resposta vem por áudio + transcrição
+    }
+
+    // Geração de imagem (Gemini)
+    const imgM = text.match(/^(?:gera(?:r)?|crie|cria|desenha|faz)\s+(?:uma?\s+)?(?:imagem|foto|figura|desenho)\s*(?:de|do|da|com)?\s*(.+)$/i)
+      || text.match(/^(?:gera(?:r)?|crie|cria)\s+(?:uma?\s+)?imagem[:\s]+(.+)$/i);
+    if (imgM && await AIProvider.canUseGemini()) {
+      showTyping();
+      const r = await GeminiImage.generate(imgM[1].trim());
+      hideTyping();
+      return GeminiImage.showInChat(r);
+    }
+
     const ex = explicito(text);
     if (ex && modo === "chat") {   // só guarda quando o usuário manda; sem perguntar "quer que eu anote?"
       const txt = (ex.conteudo || Context.prevUser() || "").replace(/^Entendi:\s*/i, "").trim();
@@ -2516,7 +2755,6 @@ async function switchMode(m, first) {
   const isInt = m === "interagir";
   const isTrain = m === "treino";
 
-  document.body.classList.toggle("mode-int", isInt);
   $("#chat").style.display = isInt ? "none" : "flex";
   $("#interact").style.display = isInt ? "flex" : "none";
   $("#mChat").className = m === "chat" ? "on" : "";
@@ -2526,16 +2764,12 @@ async function switchMode(m, first) {
   $("#in").placeholder = isTrain
     ? "Ensine algo à " + Cfg.v.nome + "…"
     : isInt
-      ? "Fale comigo ou toque num comando acima…"
+      ? "Fale comigo ou diga: strip, dança, sexy…"
       : "Escreva uma mensagem…";
 
   // limpa os dois containers de chat
   $("#chat").innerHTML = "";
   $("#interactChat").innerHTML = "";
-  // fecha painéis abertos
-  try { if (Avatar.renderCmdBar) Avatar.renderCmdBar(); } catch (e) {}
-  const menu = $("#avatarCtrlsMenu"); if (menu) menu.classList.remove("open");
-  const fab = $("#bFab"); if (fab) { fab.classList.remove("open"); fab.textContent = "⋯"; }
 
   if (isInt) {
     Avatar.bindButtons();
@@ -2549,7 +2783,7 @@ async function switchMode(m, first) {
 
   if (!h.length) {
     if (isTrain) sys("Comece com “Quero te ensinar sobre …”. Depois escreva, fale 🎙 ou anexe 📎 um arquivo.");
-    else if (isInt) say("Oi… aqui você me vê. Cadastre seus comandos em ☰ → Avatar e eles aparecem na barra de cima.");
+    else if (isInt) say("Oi… aqui você me vê. Pode falar comigo normalmente ou usar os botões. Comandos: strip, dança, sexy, comportada, veste…");
     else say("Olá! Sou a " + Cfg.v.nome + ". Tudo o que guardo fica só neste aparelho. Digite /ajuda.");
   }
 }
@@ -2673,13 +2907,14 @@ async function tCf() {
 <label class="ck"><input type="checkbox" id="cGemOn" ${c.geminiEnabled ? "checked" : ""}>Usar Gemini (ligar / desligar)</label>
 <label class="ck"><input type="checkbox" id="cGemMood" ${c.personalidadeEnvolvente ? "checked" : ""}>Personalidade envolvente (apaixonada, humor e duplo sentido)</label>
 <label class="ck"><input type="checkbox" id="cGemHot" ${c.personalidadeSemFiltro ? "checked" : ""}>Modo sem filtro / safada (explícita, sem pudor)</label>
-<small style="display:block;margin-top:-6px;margin-bottom:4px;color:var(--mut)">Os modos extras só funcionam com o Gemini ligado. Desligue quando quiser voltar ao tom normal.</small>
+<label class="ck"><input type="checkbox" id="cGemTts" ${c.geminiTts !== false ? "checked" : ""}>Voz do Gemini (TTS nativo — não usa voz do celular)</label>
+<small style="display:block;margin-top:-6px;margin-bottom:4px;color:var(--mut)">Com TTS ligado, “ouvir” e auto-fala usam a voz do Gemini. Gasta cota.</small>
 
 <label>Chave da API (cole aqui a chave nova)
 <input id="cGemKey" type="password" placeholder="AIza... ou AQ...." value="${esc(c.geminiKey || "")}" autocomplete="off">
 </label>
 
-<label>Modelo
+<label>Modelo de chat
 <select id="cGemModel">
   <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (recomendado, menos fila)</option>
   <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
@@ -2689,9 +2924,31 @@ async function tCf() {
 </select>
 </label>
 
+<label>Voz do Gemini (TTS / Live)
+<select id="cGemVoice">
+  ${GEMINI_VOICES.map(v => '<option value="' + v.id + '"' + (c.geminiVoice === v.id ? " selected" : "") + ">" + v.label + "</option>").join("")}
+</select>
+</label>
+
+<label>Modelo TTS
+<select id="cGemTtsModel">
+  <option value="gemini-3.8-flash-lite-tts">gemini-3.8-flash-lite-tts (rápido)</option>
+  <option value="gemini-3.8-flash-tts">gemini-3.8-flash-tts (mais expressivo)</option>
+</select>
+</label>
+
+<label>Modelo de imagem
+<select id="cGemImgModel">
+  <option value="gemini-3.1-flash-image">gemini-3.1-flash-image (Nano Banana 2)</option>
+  <option value="gemini-3.1-flash-lite-image">gemini-3.1-flash-lite-image (mais barato)</option>
+  <option value="gemini-3-pro-image">gemini-3-pro-image (maior qualidade)</option>
+</select>
+</label>
+
 <label>Limite diário de chamadas
 <input id="cGemLim" type="number" min="1" max="500" value="${lim}">
 </label>
+<small style="display:block;color:var(--mut)">Dica: diga “gera uma imagem de …” ou “modo live” / “parar live”.</small>
 
 <div style="margin:6px 0 4px;font-size:13px;color:var(--mut)">Uso hoje: <b id="gemUsed">${used}</b> / <span id="gemLimLab">${lim}</span></div>
 <div style="height:10px;background:var(--bd);border-radius:6px;overflow:hidden">
@@ -2710,6 +2967,9 @@ async function tCf() {
   $("#c3").value = c.tamanho;
   $("#c4").value = c.voz;
   $("#cGemModel").value = c.geminiModel || "gemini-3.5-flash-lite";
+  if ($("#cGemVoice")) $("#cGemVoice").value = c.geminiVoice || "Kore";
+  if ($("#cGemTtsModel")) $("#cGemTtsModel").value = c.geminiTtsModel || "gemini-3.8-flash-lite-tts";
+  if ($("#cGemImgModel")) $("#cGemImgModel").value = c.geminiImageModel || "gemini-3.1-flash-image";
 
   const saveAll = async () => {
     Object.assign(c, {
@@ -2723,8 +2983,12 @@ async function tCf() {
       geminiEnabled: $("#cGemOn").checked,
       personalidadeEnvolvente: $("#cGemMood").checked,
       personalidadeSemFiltro: $("#cGemHot").checked,
+      geminiTts: $("#cGemTts") ? $("#cGemTts").checked : true,
       geminiKey: $("#cGemKey").value.trim(),
       geminiModel: $("#cGemModel").value || "gemini-3.5-flash-lite",
+      geminiVoice: $("#cGemVoice") ? $("#cGemVoice").value : "Kore",
+      geminiTtsModel: $("#cGemTtsModel") ? $("#cGemTtsModel").value : "gemini-3.8-flash-lite-tts",
+      geminiImageModel: $("#cGemImgModel") ? $("#cGemImgModel").value : "gemini-3.1-flash-image",
       geminiLimit: Math.max(1, parseInt($("#cGemLim").value, 10) || 40)
     });
     await Cfg.save();
@@ -2862,9 +3126,13 @@ $("#mInt").onclick = () => switchMode("interagir");
 $("#mTr").onclick = () => switchMode("treino");
 $("#bMem").onclick = () => openSheet("mem");
 $("#bClose").onclick = () => $("#sheet").style.display = "none";
-$("#sp1").onclick = () => speechSynthesis.pause();
-$("#sp2").onclick = () => speechSynthesis.resume();
-$("#sp3").onclick = () => speechSynthesis.cancel();
+$("#sp1").onclick = () => { try { speechSynthesis.pause(); } catch (e) {} };
+$("#sp2").onclick = () => { try { speechSynthesis.resume(); } catch (e) {} };
+$("#sp3").onclick = () => {
+  try { speechSynthesis.cancel(); } catch (e) {}
+  try { GeminiAudio.stop(); } catch (e) {}
+  try { if (GeminiLive.isOn()) GeminiLive.stop(); } catch (e) {}
+};
 document.addEventListener("visibilitychange", () => { if (document.hidden) Episodes.consolidate().catch(() => {}); });
 
 /* ===== Início ===== */
