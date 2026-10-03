@@ -35,6 +35,12 @@ button.pri{background:var(--ac);color:#fff;border-color:var(--ac)}
 #bar{display:flex;gap:6px;padding:10px;background:var(--card);border-top:1px solid var(--bd);align-items:flex-end}
 textarea,input,select{font:inherit;color:var(--tx);background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:10px;width:100%}
 #in{flex:1;resize:none;max-height:120px}
+#bLive.on{background:#e5484d;color:#fff;border-color:#e5484d;animation:p 1.2s infinite}
+#bMic.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+#imgPreview{display:none;padding:6px 10px;background:var(--card);border-top:1px solid var(--bd);align-items:center;gap:8px}
+#imgPreview.show{display:flex}
+#imgPreview img{height:56px;width:56px;object-fit:cover;border-radius:10px;border:1px solid var(--bd)}
+#imgPreview button{font-size:12px;padding:4px 10px}
 #sheet{position:fixed;inset:0;background:var(--bg);display:none;flex-direction:column;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 #tabs{display:flex;gap:6px;padding:10px;overflow-x:auto;border-bottom:1px solid var(--bd)}
 #tabs button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
@@ -108,12 +114,19 @@ pre{white-space:pre-wrap;font-size:12px;margin:0}
   <button id="sp2">▶ Continuar</button>
   <button id="sp3">⏹ Parar</button>
 </div>
+<div id="imgPreview">
+  <img id="imgPrevThumb" alt="prévia">
+  <span id="imgPrevName" style="flex:1;font-size:13px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+  <button type="button" id="imgPrevClear">Remover</button>
+</div>
 <div id="bar">
-  <button class="ic" id="bAtt" title="Anexar arquivo">📎</button>
-  <textarea id="in" rows="1" placeholder="Escreva uma mensagem…"></textarea>
-  <button class="ic" id="bMic" title="Falar">🎙</button>
+  <button class="ic" id="bAtt" title="Anexar imagem ou arquivo">📎</button>
+  <textarea id="in" rows="1" placeholder="Mensagem para o Gemini…"></textarea>
+  <button class="ic" id="bLive" title="Modo Live (voz em tempo real)">⏺</button>
+  <button class="ic" id="bMic" title="Falar (Gemini)">🎙</button>
   <button class="ic pri" id="bSend" title="Enviar">➤</button>
-  <input type="file" id="file" hidden accept=".txt,.md,.json,.csv,.html,.htm,.pdf">
+  <input type="file" id="file" hidden accept="image/*,.txt,.md,.json,.csv,.html,.htm,.pdf">
+  <input type="file" id="fileImg" hidden accept="image/*">
 </div>
 <div id="sheet">
   <div id="tabs"></div>
@@ -623,7 +636,7 @@ const AIProvider = {
     const left = await GeminiUsage.remaining();
     return left > 0;
   },
-  async generateResponse(userText, extraContext) {
+  async generateResponse(userText, extraContext, imagePart) {
     if (!(await this.canUseGemini())) return null;
     const key = Cfg.v.geminiKey.trim();
     if (!key) return null;
@@ -712,12 +725,17 @@ ${instrExtra ? "\nInstruções extras do usuário: " + instrExtra : ""}`
       });
     }
 
-    // Mensagem atual do usuário
-    contents.push({ role: "user", parts: [{ text: userText }] });
+    // Mensagem atual do usuário (+ imagem opcional para visão)
+    const userParts = [];
+    if (imagePart && imagePart.data) {
+      userParts.push({ inlineData: { mimeType: imagePart.mime || "image/jpeg", data: imagePart.data } });
+    }
+    userParts.push({ text: userText || (imagePart ? "Descreva e analise esta imagem." : "") });
+    contents.push({ role: "user", parts: userParts });
 
     // Garante que contents não fique vazio e comece com user
     if (!contents.length || contents[0].role !== "user") {
-      contents.unshift({ role: "user", parts: [{ text: userText }] });
+      contents.unshift({ role: "user", parts: userParts });
     }
 
     try {
@@ -1077,6 +1095,8 @@ const GeminiLive = {
           this.active = true;
           setSt("● Live ativo");
           $("#dot").className = "dot on";
+          const bl = $("#bLive"); if (bl) bl.classList.add("on");
+          const bm = $("#bMic"); if (bm) bm.classList.add("on");
           this._startMic().then(() => resolve(true)).catch(() => resolve(true));
           return;
         }
@@ -1132,6 +1152,8 @@ const GeminiLive = {
     }
     setSt("Pronta");
     $("#dot").className = "dot";
+    const bl = $("#bLive"); if (bl) bl.classList.remove("on");
+    const bm = $("#bMic"); if (bm) bm.classList.remove("on");
     if (typeof Avatar !== "undefined") Avatar.setSpeaking(false);
   },
 
@@ -1339,19 +1361,23 @@ const Voice = (() => {
   };
 
   function speak(t) {
-    // Preferência: voz nativa do Gemini (TTS) quando ligada
-    if (Cfg.v.geminiEnabled && Cfg.v.geminiTts && Cfg.v.geminiKey) {
+    // Prioridade absoluta: Gemini TTS (nunca mistura com voz do navegador)
+    try { speechSynthesis.cancel(); } catch (e) {}
+    try { GeminiAudio.stop(); } catch (e) {}
+    if (Cfg.v.geminiEnabled && Cfg.v.geminiKey && Cfg.v.geminiTts !== false) {
       GeminiAudio.speak(t).then(ok => {
-        if (!ok) speakBrowser(t);
+        if (!ok) {
+          // só cai no navegador se o TTS do Gemini falhar de verdade
+          speakBrowser(t);
+        }
       });
       return;
     }
     speakBrowser(t);
   }
   function speakBrowser(t) {
-    if (!synOk()) return sys("Este navegador não oferece síntese de voz.");
-    try { GeminiAudio.stop(); } catch (e) {}
-    speechSynthesis.cancel();
+    if (!synOk()) return;
+    try { speechSynthesis.cancel(); } catch (e) {}
     const u = new SpeechSynthesisUtterance(t);
     u.lang = "pt-BR";
     const v = pick();
@@ -3062,40 +3088,137 @@ function applyCfg() {
   document.title = Cfg.v.nome;
 }
 
-/* ===== Eventos ===== */
-function send() {
-  const t = $("#in").value;
+/* ===== Eventos (Gemini-first) ===== */
+let pendingImage = null; // { mime, data, name }
+
+function clearPendingImage() {
+  pendingImage = null;
+  const prev = $("#imgPreview");
+  if (prev) prev.classList.remove("show");
+}
+
+function setPendingImage(file) {
+  return new Promise((resolve, reject) => {
+    if (!file || !file.type.startsWith("image/")) return reject(new Error("Não é imagem"));
+    const fr = new FileReader();
+    fr.onload = () => {
+      const dataUrl = fr.result;
+      const b64 = dataUrl.split(",")[1];
+      pendingImage = { mime: file.type, data: b64, name: file.name };
+      const prev = $("#imgPreview");
+      if (prev) {
+        $("#imgPrevThumb").src = dataUrl;
+        $("#imgPrevName").textContent = file.name;
+        prev.classList.add("show");
+      }
+      resolve(pendingImage);
+    };
+    fr.onerror = reject;
+    fr.readAsDataURL(file);
+  });
+}
+
+async function send() {
+  const t = ($("#in").value || "").trim();
+  const img = pendingImage;
   $("#in").value = "";
   $("#in").style.height = "auto";
-  // Para o mic e zera o buffer — evita o texto antigo voltar no input
   if (Voice.active()) Voice.stopAndClear();
+  try { speechSynthesis.cancel(); } catch (e) {}
+  try { GeminiAudio.stop(); } catch (e) {}
+
+  // Live ativo: só encaminha texto
+  if (GeminiLive.isOn()) {
+    if (t) {
+      bubble("u", t);
+      Context.push("u", t);
+      GeminiLive.sendText(t);
+    }
+    return;
+  }
+
+  // Imagem para análise (visão Gemini)
+  if (img) {
+    clearPendingImage();
+    bubble("u", (t || "Analise esta imagem") + "\n📷 " + (img.name || "imagem"));
+    Context.push("u", t || "Analise esta imagem");
+    if (!(await AIProvider.canUseGemini())) {
+      return say("Ligue o Gemini e configure a chave para analisar imagens.");
+    }
+    showTyping();
+    const r = await AIProvider.generateResponse(t || "Descreva e analise esta imagem em português, com detalhes úteis.", null, img);
+    hideTyping();
+    if (r && r.text) {
+      say(r.text);
+    } else {
+      say((r && r.error) || "Não consegui analisar a imagem.");
+    }
+    return;
+  }
+
+  if (!t) return;
   handle(t);
 }
 $("#bSend").onclick = send;
-$("#in").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && innerWidth > 700) { e.preventDefault(); send(); } });
+$("#in").addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey && innerWidth > 700) { e.preventDefault(); send(); }
+});
 $("#in").addEventListener("input", e => {
   e.target.style.height = "auto";
   e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
-  // Se o usuário apagou tudo enquanto o mic está ativo, zera o buffer
-  // para o próximo trecho de voz não ressuscitar o texto antigo
-  if (Voice.active() && !(e.target.value || "").trim()) {
-    Voice.resetBuffer();
-  }
+  if (Voice.active() && !(e.target.value || "").trim()) Voice.resetBuffer();
 });
-$("#bMic").onclick = () => {
-  if (Voice.active()) {
-    // Para de ouvir, deixa o texto no campo para editar/enviar manualmente
-    Voice.stop();
-    $("#dot").className = "dot";
-    setSt("Pronta");
-    const ta = $("#in");
-    ta.style.height = "auto";
-    ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
-    ta.focus();
+
+// Live: botão dedicado (como no app do Gemini)
+$("#bLive").onclick = async () => {
+  if (GeminiLive.isOn()) {
+    GeminiLive.stop();
+    $("#bLive").classList.remove("on");
+    $("#bMic").classList.remove("on");
+    sys("Live desligado.");
     return;
   }
+  if (!(await AIProvider.canUseGemini())) {
+    return sys("Ligue o Gemini e cole a chave em ☰ → Config.");
+  }
+  try { speechSynthesis.cancel(); } catch (e) {}
+  try { GeminiAudio.stop(); } catch (e) {}
+  if (Voice.active()) Voice.stopAndClear();
+  const ok = await GeminiLive.start();
+  if (ok) {
+    $("#bLive").classList.add("on");
+    $("#bMic").classList.add("on");
+    sys("Live ativo — fale no microfone. Toque ⏺ de novo para parar.");
+  } else {
+    $("#bLive").classList.remove("on");
+  }
+};
+
+// Microfone: com Gemini → Live; sem Gemini → ditado local no campo
+$("#bMic").onclick = async () => {
+  if (GeminiLive.isOn()) {
+    GeminiLive.stop();
+    $("#bLive").classList.remove("on");
+    $("#bMic").classList.remove("on");
+    sys("Live desligado.");
+    return;
+  }
+  if (Cfg.v.geminiEnabled && Cfg.v.geminiKey) {
+    // Atalho: microfone liga o Live (voz Gemini ponta a ponta)
+    $("#bLive").click();
+    return;
+  }
+  // Fallback local só se Gemini estiver off
+  if (Voice.active()) {
+    Voice.stop();
+    $("#bMic").classList.remove("on");
+    $("#dot").className = "dot";
+    setSt("Pronta");
+    return;
+  }
+  $("#bMic").classList.add("on");
   $("#dot").className = "dot on";
-  setSt("● Ouvindo… (toque de novo no microfone para parar)");
+  setSt("● Ouvindo… (local)");
   Voice.listen(
     t => {
       $("#in").value = t;
@@ -3104,6 +3227,7 @@ $("#bMic").onclick = () => {
       ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
     },
     finalText => {
+      $("#bMic").classList.remove("on");
       $("#dot").className = "dot";
       setSt("Pronta");
       if (finalText) {
@@ -3112,15 +3236,38 @@ $("#bMic").onclick = () => {
         ta.style.height = "auto";
         ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
       }
-      // NÃO envia automaticamente — usuário revisa e aperta Enviar
     }
   );
 };
+
+// Anexar: imagem → visão Gemini; outros arquivos → treino
 $("#bAtt").onclick = () => {
-  if (modo !== "treino") { switchMode("treino"); sys("Arquivos são ensinados no Modo Treinamento."); }
-  $("#file").click();
+  if (modo === "treino") $("#file").click();
+  else $("#fileImg").click();
 };
-$("#file").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) { bubble("u", "📎 " + f.name); importFile(f); } };
+$("#fileImg").onchange = async e => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  try {
+    await setPendingImage(f);
+    sys("Imagem pronta. Escreva uma pergunta (opcional) e envie.");
+  } catch (err) {
+    sys("Não foi possível carregar a imagem.");
+  }
+};
+$("#imgPrevClear").onclick = () => clearPendingImage();
+$("#file").onchange = e => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  if (f.type.startsWith("image/") && modo !== "treino") {
+    setPendingImage(f).then(() => sys("Imagem pronta. Envie para o Gemini analisar."));
+    return;
+  }
+  bubble("u", "📎 " + f.name);
+  importFile(f);
+};
 $("#mChat").onclick = () => switchMode("chat");
 $("#mInt").onclick = () => switchMode("interagir");
 $("#mTr").onclick = () => switchMode("treino");
