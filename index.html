@@ -70,7 +70,7 @@ async function preview(id){const a=await get('art',id),m=$('#mc');m.innerHTML=''
 if(a.mime.startsWith('image/')){el=new Image();el.src='data:'+a.mime+';base64,'+a.content}
 else if(a.mime=='text/html'||a.mime=='image/svg+xml'){el=document.createElement('iframe');el.setAttribute('sandbox','allow-scripts');el.srcdoc=await build(a)}
 else{el=document.createElement('pre');el.style.cssText='flex:1;overflow:auto;margin:0;padding:12px;background:var(--sf);color:var(--tx);white-space:pre-wrap';let c=a.content;if(a.mime=='application/json')try{c=JSON.stringify(JSON.parse(c),null,2)}catch(e){}if(a.mime=='text/markdown')el=Object.assign(document.createElement('div'),{innerHTML:md(c)}),el.style.cssText='flex:1;overflow:auto;padding:12px;background:var(--sf);color:var(--tx)';else el.textContent=c}
-m.append(el);$('#md').classList.add('o')}
+m.append(el);openL('md')}
 const AI={base:'https://generativelanguage.googleapis.com/v1beta/models/',
 async hdr(){const k=await gs('key');if(!k)throw Error('Adicione sua API Key em Configurações.');return{'Content-Type':'application/json','x-goog-api-key':k}},
 async err(r){let m='';try{m=(await r.json()).error.message}catch(e){}throw Object.assign(Error(r.status==429?'Limite da API atingido. Aguarde e tente de novo.':r.status==400||r.status==403?'Chave inválida ou sem permissão. '+m:'Erro '+r.status+'. '+m),{status:r.status})},
@@ -90,7 +90,7 @@ async function load(cid){S.cid=cid;const c=$('#chat');c.innerHTML='';if(!cid){c.
 $('#ttl').textContent=(await get('conv',cid)).title;(await byC('msg',cid)).sort((a,b)=>a.ts-b.ts).forEach(bubble)}
 async function send(regen){if(S.busy)return;const ta=$('#in');let text=ta.value.trim(),att=S.att,hist;
 if(!regen&&!text&&!att.length)return;let key;try{await AI.hdr()}catch(e){alert(e.message);return}
-if(!S.cid){const c={id:uid(),title:(text||att[0]?.name||'Nova conversa').slice(0,40),ts:Date.now()};await put('conv',c);S.cid=c.id;$('#chat').innerHTML='';$('#ttl').textContent=c.title}
+if(!S.cid){const c={id:uid(),title:(text||att[0]?.name||'Nova conversa').slice(0,40),ts:Date.now()};await put('conv',c);S.cid=c.id;if(!L.includes('chat'))openL('chat');$('#chat').innerHTML='';$('#ttl').textContent=c.title}
 if(!regen){const u={id:uid(),conv:S.cid,role:'user',text,att,ts:Date.now()};await put('msg',u);bubble(u);ta.value='';S.att=[];prev();ta.style.height='auto'}
 hist=(await byC('msg',S.cid)).sort((a,b)=>a.ts-b.ts);const last=hist[hist.length-1];
 S.busy=true;$('#bn').textContent='■';const el=bubble({id:'t',role:'model',text:'Gerando...'});const mm={id:uid(),conv:S.cid,role:'model',text:'',ts:Date.now()};
@@ -113,7 +113,13 @@ let q='';try{const e=await navigator.storage.estimate();q='Usado: '+fsize(e.usag
 const theme=t=>t=='auto'?document.documentElement.removeAttribute('data-t'):document.documentElement.dataset.t=t;
 const clean=t=>t.replace(/```[\s\S]*?```/g,' ').replace(/\[([^\]]+)\]\([^)]+\)/g,'$1').replace(/[`*#>_~]/g,'').replace(/[\p{Extended_Pictographic}\u200d\uFE0F]/gu,'').replace(/\s+/g,' ').trim();let AU;
 function wav(b64,mt){const d=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));if(b64.startsWith('UklGR')||/wav/i.test(mt))return new Blob([d],{type:'audio/wav'});const r=+(/rate=(\d+)/.exec(mt)||[])[1]||24000,h=new DataView(new ArrayBuffer(44)),w=(o,x)=>[...x].forEach((c,k)=>h.setUint8(o+k,c.charCodeAt(0)));w(0,'RIFF');h.setUint32(4,36+d.length,true);w(8,'WAVEfmt ');h.setUint32(16,16,true);h.setUint16(20,1,true);h.setUint16(22,1,true);h.setUint32(24,r,true);h.setUint32(28,r*2,true);h.setUint16(32,2,true);h.setUint16(34,16,true);w(36,'data');h.setUint32(40,d.length,true);return new Blob([h.buffer,d],{type:'audio/wav'})}
-const A={close(){document.querySelectorAll('.pn,#md').forEach(x=>x.classList.remove('o'));$('#mc').innerHTML=''},
+const L=[];let after=null,exitOk=false;const back=()=>history.back();
+function show(n,on){if(n=='sb')$('#sb').classList.toggle('o',on);else if(n=='pf'||n=='ps')$('#'+n).classList.toggle('o',on);else if(n=='md'){$('#md').classList.toggle('o',on);if(!on)$('#mc').innerHTML=''}else if(n=='chat'&&!on)load(null)}
+function openL(n){L.push(n);history.pushState({d:L.length},'');show(n,true)}
+const goHome=()=>{const k=L.length-L.indexOf('chat');if(L.includes('chat'))history.go(-k);else load(null)};
+addEventListener('popstate',()=>{const d=history.state?.d??-1;if(d>L.length){history.back();return}while(L.length>Math.max(d,0))show(L.pop(),false);
+if(d<0){if(exitOk)return;if(confirm('Sair do app?')){exitOk=true;history.back()}else history.pushState({d:0},'')}else if(after){const f=after;after=null;f()}});
+const A={close(){back()},
 async dl(i){const a=await get('art',i);save(blob(a),a.name)},async sh(i){share(await get('art',i))},pv:i=>preview(i),
 async zip(i){const as=(await all('art')).filter(a=>a.mid==i);save(zip(as.map(a=>({name:a.name,data:bytes(a)}))),'projeto-'+as[0].name.replace(/\..*/,'')+'.zip')},
 async cp(i){await navigator.clipboard?.writeText((await get('msg',i)).text)},
@@ -123,9 +129,9 @@ const p=(await r.json()).candidates[0].content.parts.find(x=>x.inlineData||x.inl
 catch(e){AU=null;alert('Voz Gemini indisponível: '+e.message+'\nUsando a voz do navegador.');const u=Object.assign(new SpeechSynthesisUtterance(t),{lang:'pt-BR'});speechSynthesis.speak(u)}},
 async rg(i){await del('msg',i);for(const a of await byC('art',S.cid))if(a.mid==i)await del('art',a.id);await load(S.cid);send(true)},
 async mem(i){await put('mem',{id:uid(),text:(await get('msg',i)).text.slice(0,300),ts:Date.now()});alert('Salvo na memória.')},
-async oc(i){await load(i);$('#sb').classList.remove('o');sideList()},
+oc(i){const go=async()=>{await load(i);sideList();if(!L.includes('chat'))openL('chat')};if(L.at(-1)=='sb'){after=go;back()}else go()},
 async rc(i){const c=await get('conv',i),t=prompt('Novo nome',c.title);if(t){c.title=t;await put('conv',c);sideList();if(i==S.cid)$('#ttl').textContent=t}},
-async dc(i){if(!confirm('Excluir conversa e seus arquivos?'))return;for(const s of['msg','art'])for(const x of await byC(s,i))await del(s,x.id);await del('conv',i);if(i==S.cid)await load(null);sideList()},
+async dc(i){if(!confirm('Excluir conversa e seus arquivos?'))return;for(const s of['msg','art'])for(const x of await byC(s,i))await del(s,x.id);await del('conv',i);if(i==S.cid)goHome();sideList()},
 ra(i){S.att.splice(i,1);prev()},async rn(i){const a=await get('art',i),n=prompt('Novo nome',a.name);if(n){a.name=n.replace(/[^\w.\-]/g,'-');await put('art',a);filesView()}},
 async da(i){if(confirm('Excluir arquivo?')){await del('art',i);filesView()}},async dm(i){await del('mem',i);setView()},
 async addm(){const t=$('#mnw').value.trim();if(t){await put('mem',{id:uid(),text:t,ts:Date.now()});$('#mnw').value='';setView()}},
@@ -137,8 +143,8 @@ async exp(){const d={v:1,conv:await all('conv'),msg:await all('msg'),mem:await a
 imp(){$('#bi2').click()}};
 document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(b)A[b.dataset.a]?.(b.dataset.i?(isNaN(b.dataset.i)||b.dataset.a!='ra'?b.dataset.i:+b.dataset.i):undefined)});
 $('#bi2').onchange=async e=>{try{const d=JSON.parse(await e.target.files[0].text());if(!d.v)throw 0;if(!confirm('Importar '+d.conv.length+' conversas? Itens existentes com o mesmo ID serão atualizados.'))return;for(const s of['conv','msg','mem','art'])for(const x of d[s])await put(s,x);await load(null);sideList();setView();alert('Backup importado.')}catch(x){alert('Arquivo de backup inválido.')}e.target.value=''};
-$('#mn').onclick=()=>{$('#sb').classList.toggle('o');sideList()};$('#sq').oninput=sideList;$('#nc').onclick=async()=>{await load(null);$('#sb').classList.remove('o')};
-$('#bf').onclick=()=>{$('#pf').classList.add('o');filesView()};$('#fq').oninput=filesView;$('#bs').onclick=()=>{$('#ps').classList.add('o');setView()};
+$('#mn').onclick=()=>{L.at(-1)=='sb'?back():openL('sb');sideList()};$('#sq').oninput=sideList;$('#nc').onclick=()=>{if(L.at(-1)=='sb'){after=goHome;back()}else goHome()};$('#chat').addEventListener('click',()=>{if(L.at(-1)=='sb')back()});
+$('#bf').onclick=()=>{openL('pf');filesView()};$('#fq').oninput=filesView;$('#bs').onclick=()=>{openL('ps');setView()};
 $('#th').onchange=async e=>{await ss('th',e.target.value);theme(e.target.value)};
 $('#ba').onclick=()=>$('#fi').click();$('#fi').onchange=e=>{addFiles(e.target.files);e.target.value=''};
 $('#bi').onclick=()=>{S.img=!S.img;$('#bi').classList.toggle('on',S.img);$('#in').placeholder=S.img?'Descreva a imagem a gerar...':'Digite uma mensagem...'};
@@ -150,5 +156,6 @@ const SR=window.SpeechRecognition||window.webkitSpeechRecognition;let rec;
 $('#bm').onclick=()=>{if(!SR)return alert('Reconhecimento de voz não é suportado neste navegador.');if(rec){rec.stop();return}rec=new SR();rec.lang='pt-BR';rec.interimResults=true;const base=$('#in').value;$('#bm').classList.add('on');
 rec.onresult=e=>{$('#in').value=(base+' '+[...e.results].map(r=>r[0].transcript).join(' ')).trim()};rec.onerror=e=>{if(e.error=='not-allowed')alert('Permissão do microfone negada.')};rec.onend=()=>{rec=null;$('#bm').classList.remove('on')};rec.start()};
 if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('sw.js').catch(()=>{});
+history.replaceState({d:-1},'');history.pushState({d:0},'');
 (async()=>{await open();for(const[k,o,n]of[['mt','gemini-2.5-flash','gemini-3.8-flash'],['mi','gemini-2.5-flash-image','gemini-3.1-flash-image']])if(await gs(k)==o)await ss(k,n);theme(await gs('th','auto'));await load(null);if(!(await gs('key')))$('#chat').querySelector('.empty').insertAdjacentHTML('beforeend','<p>Comece em ⚙ adicionando sua API Key do Gemini.</p>')})();
 </script></body></html>
