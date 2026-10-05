@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#4b3fe0"><title>Minha IA</title>
+<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#4b3fe0"><title>Minha IA</title><link rel="manifest" href="manifest.json"><link rel="icon" href="icon.svg"><link rel="apple-touch-icon" href="icon.svg"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes">
 <style>
 :root{--bg:#eef0f6;--sf:#fff;--tx:#161a2b;--mu:#6b7186;--ac:#4b3fe0;--bd:#d9dcea;--ub:#4b3fe0;--ut:#fff;--cd:#e4e7f3}
 @media(prefers-color-scheme:dark){:root:not([data-t=light]){--bg:#0e1018;--sf:#171a26;--tx:#e8eaf5;--mu:#8a90a8;--ac:#8c84ff;--bd:#272b3d;--ub:#3a33a8;--cd:#1f2333}}
@@ -143,5 +143,6 @@ $('#in').addEventListener('paste',e=>{const f=[...e.clipboardData.files];if(f.le
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;let rec;
 $('#bm').onclick=()=>{if(!SR)return alert('Reconhecimento de voz não é suportado neste navegador.');if(rec){rec.stop();return}rec=new SR();rec.lang='pt-BR';rec.interimResults=true;const base=$('#in').value;$('#bm').classList.add('on');
 rec.onresult=e=>{$('#in').value=(base+' '+[...e.results].map(r=>r[0].transcript).join(' ')).trim()};rec.onerror=e=>{if(e.error=='not-allowed')alert('Permissão do microfone negada.')};rec.onend=()=>{rec=null;$('#bm').classList.remove('on')};rec.start()};
+if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('sw.js').catch(()=>{});
 (async()=>{await open();theme(await gs('th','auto'));await load(null);if(!(await gs('key')))$('#chat').querySelector('.empty').insertAdjacentHTML('beforeend','<p>Comece em ⚙ adicionando sua API Key do Gemini.</p>')})();
 </script></body></html>
